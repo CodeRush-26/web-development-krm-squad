@@ -291,7 +291,13 @@ export class GeminiService {
     const prompt = `You are a maritime emergency dispatcher. Analyze the following message and return ONLY a valid JSON object. Do not include markdown formatting or extra text.
 Available Ports: ${AVAILABLE_PORTS.join(', ')}.
 Support Vessels: ${SUPPORT_VESSELS.join(', ')}.
-If distress indicates Mechanical Failure, Out of Fuel, or Medical Emergency, set "suggestedAction" like: "Redirect to [Port Name] for immediate assistance."
+If distress indicates Mechanical Failure, Out of Fuel, or Medical Emergency, suggestedAction must be operationally realistic.
+
+Rules for suggestedAction:
+- If the vessel cannot proceed under own power (engine failure, stopped / dead in water, loss of propulsion, blackout), you MUST mention dispatching a tug/tow or salvage — do NOT imply the ship can simply "sail" or "redirect" to port alone.
+- If there are injuries or medical emergency, mention MedEvac/helicopter/coastal medevac as appropriate together with nearest suitable port.
+- If both apply, combine tug/tow + medical evacuation + Coast Guard coordination.
+
 Schema: { "severity": "low" | "medium" | "high", "type": string, "summary": string, "injuries": number, "needsEscort": boolean, "suggestedAction": string }.
 
 Message:
@@ -330,6 +336,13 @@ ${message}`;
         suggestedAction = heuristic.suggestedAction;
       }
 
+      if (
+        distressCannotProceedUnderOwnPower(message) &&
+        !llmCoversLossOfPropulsionAction(suggestedAction)
+      ) {
+        suggestedAction = heuristic.suggestedAction;
+      }
+
       return {
         severity,
         type,
@@ -344,8 +357,18 @@ ${message}`;
       const status = error?.response?.status;
       const responseBody = error?.response?.data;
       console.error('Distress LLM request failed:', status || error.message, responseBody);
-      if (status === 429) {
+      const errStr =
+        typeof responseBody?.error === 'string'
+          ? responseBody.error
+          : JSON.stringify(responseBody || {});
+      if (this.provider === 'xai' && status === 400 && /incorrect api key|invalid api key/i.test(errStr)) {
+        console.warn(
+          '[Distress] xAI rejected XAI_API_KEY (use a key from https://console.x.ai — a Google/Gemini key will not work). Using rule-based classification.'
+        );
+      } else if (status === 429) {
         console.warn('[Distress] Using rule-based classification (LLM quota or rate limit).');
+      } else if (!status || status >= 500) {
+        console.warn('[Distress] Using rule-based classification (LLM error).');
       }
       return {
         ...heuristic,

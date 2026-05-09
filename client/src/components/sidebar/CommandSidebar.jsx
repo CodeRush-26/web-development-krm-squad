@@ -11,9 +11,27 @@ import {
   inferShipType,
 } from '../../utils/shipVisuals';
 
+function operationalChannelLabel(channel) {
+  if (channel === 'fleet_advisor') return 'Advisor';
+  if (channel === 'distress') return 'Distress';
+  return 'Security';
+}
+
+function formatUtcHm(ts) {
+  try {
+    return `${new Date(ts).toISOString().slice(11, 19)}Z`;
+  } catch {
+    return '—';
+  }
+}
+
 export function CommandSidebar({
   ships,
   threats = [],
+  radarContactMemory = {},
+  operationalLog = [],
+  onClearOperationalLog,
+  onDismissRecommendation,
   selectedShipId,
   selectedDarkThreatId = '',
   onFocusThreat,
@@ -43,6 +61,12 @@ export function CommandSidebar({
       .slice()
       .sort((a, b) => (Number(a.distanceKm) || 999) - (Number(b.distanceKm) || 999));
   }, [threats]);
+
+  const droppedRadarContacts = useMemo(() => {
+    return Object.values(radarContactMemory || {})
+      .filter((e) => (e.tier ?? 0) < 1 && (e.maxTier ?? 0) >= 1)
+      .sort((a, b) => (b.droppedAt || 0) - (a.droppedAt || 0));
+  }, [radarContactMemory]);
 
   const showFleetTabBody = userRole !== 'command' || sidebarTab === 'fleet';
   const showTypeFilters = showFleetTabBody;
@@ -153,15 +177,55 @@ export function CommandSidebar({
           <div className="ai-reco-action">
             {latestRecommendation.suggestedAction || 'Monitor situation and coordinate support.'}
           </div>
-          {latestRecommendation.shipId ? (
+          <div className="ai-reco-actions">
+            {latestRecommendation.shipId ? (
+              <button
+                type="button"
+                className="tool-btn"
+                onClick={() => onApplyRecommendation(latestRecommendation)}
+              >
+                Apply AI Recommendation
+              </button>
+            ) : null}
             <button
               type="button"
-              className="tool-btn"
-              onClick={() => onApplyRecommendation(latestRecommendation)}
+              className="tool-btn ai-reco-dismiss"
+              onClick={() => onDismissRecommendation?.()}
             >
-              Apply AI Recommendation
+              Dismiss banner
             </button>
-          ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {operationalLog.length > 0 ? (
+        <div className="operational-log-panel">
+          <div className="operational-log-header">
+            <span className="operational-log-title">Operational message log</span>
+            <button
+              type="button"
+              className="operational-log-clear"
+              onClick={() => onClearOperationalLog?.()}
+            >
+              Clear log
+            </button>
+          </div>
+          <p className="operational-log-hint">
+            Persistent record of advisor, distress, and security traffic (most recent at top).
+          </p>
+          <ul className="operational-log-list">
+            {[...operationalLog].reverse().map((entry) => (
+              <li key={entry.id} className="operational-log-row">
+                <span className="operational-log-time">{formatUtcHm(entry.receivedAt)}</span>
+                <span
+                  className={`operational-log-chip operational-log-chip-${String(entry.channel).replace(/_/g, '-')}`}
+                >
+                  {operationalChannelLabel(entry.channel)}
+                </span>
+                <span className="operational-log-summary">{entry.summaryLine}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
@@ -171,6 +235,7 @@ export function CommandSidebar({
           <p className="security-panel-hint">
             Contacts appear when inside any friendly vessel&apos;s ~10 km radar envelope.
           </p>
+          <div className="security-panel-subheading">Active (inside radar envelope)</div>
           <ul className="security-contact-list">
             {securityContacts.length === 0 ? (
               <li className="security-contact-empty">No active radar contacts.</li>
@@ -194,6 +259,35 @@ export function CommandSidebar({
               ))
             )}
           </ul>
+          {droppedRadarContacts.length > 0 ? (
+            <>
+              <div className="security-panel-subheading dropped">Recent — outside envelope</div>
+              <p className="security-panel-hint security-panel-hint-tight">
+                Contacts remain listed for 45 minutes after Tier drops below 1 (lost radar closure).
+              </p>
+              <ul className="security-contact-list">
+                {droppedRadarContacts.map((mem) => (
+                  <li key={`dropped-${mem.threatId}`}>
+                    <button
+                      type="button"
+                      className={`security-contact-btn security-contact-dropped rounded-xl ${selectedDarkThreatId === mem.threatId ? 'active' : ''}`}
+                      onClick={() => onFocusThreat?.(mem.threatId)}
+                    >
+                      <span className="security-contact-title">
+                        {mem.identified ? mem.aiLabel || 'Identified threat' : 'UNIDENTIFIED'}{' '}
+                        <span className="security-dropped-badge">track retained</span>
+                      </span>
+                      <span className="security-contact-meta">
+                        {mem.threatId} · last {Number(mem.distanceKm ?? 0).toFixed(2)} km · was Tier{' '}
+                        {mem.maxTier}
+                        {mem.closestFriendlyShipId ? ` · nearest ${mem.closestFriendlyShipId}` : ''}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
         </div>
       ) : (
         <ul className="ship-list">

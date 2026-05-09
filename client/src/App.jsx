@@ -59,6 +59,25 @@ function findShipByLooseName(rawName, shipList) {
   return shipList.find((ship) => ship.name.toLowerCase().includes(n)) || null;
 }
 
+const OPERATIONAL_LOG_CAP = 40;
+const FLEET_ADVISOR_LOG_DEDUPE_MS = 120000;
+
+/** Rolling operational log (fleet advisor, distress, security) — survives banner churn. */
+function mergeOperationalLog(prev, entry) {
+  let next = [...prev, entry];
+  if (entry.channel === 'fleet_advisor' && prev.length > 0) {
+    const last = prev[prev.length - 1];
+    if (
+      last.channel === 'fleet_advisor' &&
+      last.shipId === entry.shipId &&
+      entry.receivedAt - last.receivedAt < FLEET_ADVISOR_LOG_DEDUPE_MS
+    ) {
+      next = [...prev.slice(0, -1), { ...entry, id: last.id }];
+    }
+  }
+  return next.slice(-OPERATIONAL_LOG_CAP);
+}
+
 export default function App() {
   const { ships, threats, socketStatus, weather, zones, alerts } = useInterpolatedFleet();
   const telemetryPulse = useTelemetryPulse(ships);
@@ -82,6 +101,8 @@ export default function App() {
   const [commandFilterShipIds, setCommandFilterShipIds] = useState(null);
   const [commandProximity, setCommandProximity] = useState(null);
   const [latestRecommendation, setLatestRecommendation] = useState(null);
+  const [operationalLog, setOperationalLog] = useState([]);
+  const [radarContactMemory, setRadarContactMemory] = useState({});
   const [diversionRoutes, setDiversionRoutes] = useState({});
 
   const markerRefs = useRef({});
@@ -150,6 +171,55 @@ export default function App() {
     }
     return latestRecommendation;
   }, [captainShipId, latestRecommendation, userRole]);
+
+  useEffect(() => {
+    const now = Date.now();
+    const ttlMs = 45 * 60 * 1000;
+    setRadarContactMemory((prev) => {
+      const next = { ...prev };
+      for (const t of threats) {
+        const id = t.threatId;
+        const tier = Number(t.tier) || 0;
+        const existing = next[id];
+        if (tier >= 1) {
+          next[id] = {
+            threatId: id,
+            tier,
+            distanceKm: t.distanceKm,
+            closestFriendlyShipId: t.closestFriendlyShipId,
+            identified: Boolean(t.identified),
+            aiLabel: t.aiLabel || null,
+            lastPingAt: now,
+            droppedAt: null,
+            maxTier: Math.max(tier, existing?.maxTier ?? 0),
+          };
+        } else if (existing) {
+          const justDropped = existing.tier >= 1 && tier < 1;
+          next[id] = {
+            ...existing,
+            tier,
+            distanceKm: t.distanceKm,
+            closestFriendlyShipId: t.closestFriendlyShipId,
+            identified: Boolean(t.identified),
+            aiLabel: t.aiLabel || existing.aiLabel,
+            lastPingAt: now,
+            droppedAt: justDropped ? now : existing.droppedAt,
+            maxTier: Math.max(existing.maxTier ?? 0, tier),
+          };
+        }
+      }
+      for (const id of Object.keys(next)) {
+        const e = next[id];
+        if (e.tier >= 1) continue;
+        if ((e.maxTier ?? 0) < 1) {
+          delete next[id];
+          continue;
+        }
+        if (e.droppedAt && now - e.droppedAt > ttlMs) delete next[id];
+      }
+      return next;
+    });
+  }, [threats]);
 
   const commandFilterSet = useMemo(
     () => (commandFilterShipIds ? new Set(commandFilterShipIds) : null),
@@ -538,6 +608,18 @@ export default function App() {
       const severity = latest.payload?.severity || 'medium';
       const border = severity === 'high' ? '#ff2d55' : '#f59e0b';
       setLatestRecommendation(latest.payload);
+      const receivedAt = Date.now();
+      setOperationalLog((prev) =>
+        mergeOperationalLog(prev, {
+          id: `distress-${receivedAt}-${Math.random().toString(36).slice(2, 9)}`,
+          channel: 'distress',
+          receivedAt,
+          summaryLine:
+            latest.payload?.summary ||
+            `Distress (${severity}) — ${latest.payload?.shipId || 'unknown ship'}`,
+          shipId: latest.payload?.shipId,
+        })
+      );
       toast.custom((t) => (
         <div
           className="ai-recommend-toast"
@@ -589,9 +671,31 @@ export default function App() {
     } else if (latest.type === 'fleet_advisor') {
       toast.error(latest.payload?.summary || 'Fleet advisor warning');
       setLatestRecommendation(latest.payload);
+      const receivedAt = Date.now();
+      setOperationalLog((prev) =>
+        mergeOperationalLog(prev, {
+          id: `fleet-${receivedAt}-${Math.random().toString(36).slice(2, 9)}`,
+          channel: 'fleet_advisor',
+          receivedAt,
+          summaryLine:
+            latest.payload?.summary ||
+            `Fleet advisor — ${latest.payload?.shipId || 'fleet'}`,
+          shipId: latest.payload?.shipId,
+        })
+      );
     } else if (latest.type === 'security') {
       const p = latest.payload || {};
       const msg = p.message || 'Security alert';
+      const receivedAt = Date.now();
+      setOperationalLog((prev) =>
+        mergeOperationalLog(prev, {
+          id: `security-${receivedAt}-${Math.random().toString(36).slice(2, 9)}`,
+          channel: 'security',
+          receivedAt,
+          summaryLine: msg,
+          securityKind: p.kind || 'info',
+        })
+      );
       if (p.kind === 'threat') {
         toast.error(msg, { duration: 8000 });
         if (highAlarmRef.current) {
@@ -920,6 +1024,10 @@ export default function App() {
       <CommandSidebar
         ships={visibleShips}
         threats={threats}
+        radarContactMemory={radarContactMemory}
+        operationalLog={operationalLog}
+        onClearOperationalLog={() => setOperationalLog([])}
+        onDismissRecommendation={() => setLatestRecommendation(null)}
         allShips={ships}
         selectedDarkThreatId={selectedDarkThreatId}
         onFocusThreat={handleFocusThreatOnMap}
