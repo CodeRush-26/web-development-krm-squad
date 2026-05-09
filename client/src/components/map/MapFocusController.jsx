@@ -6,6 +6,8 @@ export function MapFocusController({
   markerRefs,
   followSelected,
   focusNonce,
+  /** False when vessel detail is shown in sidebar instead of a Leaflet popup */
+  openPopupOnSelect = true,
 }) {
   const map = useMap();
   const prevShipIdRef = useRef('');
@@ -29,9 +31,11 @@ export function MapFocusController({
       });
     }
 
-    const marker = markerRefs.current[selectedShip.shipId];
-    if (marker) marker.openPopup();
-  }, [followSelected, map, markerRefs, selectedShip]);
+    if (openPopupOnSelect) {
+      const marker = markerRefs.current[selectedShip.shipId];
+      if (marker?.openPopup) marker.openPopup();
+    }
+  }, [followSelected, focusNonce, map, markerRefs, openPopupOnSelect, selectedShip]);
 
   return null;
 }

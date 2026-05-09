@@ -11,6 +11,7 @@ import { Compass, FilterX, LocateFixed, Menu, Orbit, X } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import { API_URL, MAP_CENTER, MAP_ZOOM, PORTS } from './constants/fleet';
 import { useInterpolatedFleet } from './hooks/useInterpolatedFleet';
+import { useFleetSoundscape } from './hooks/useFleetSoundscape';
 import { useTelemetryPulse } from './hooks/useTelemetryPulse';
 import { utcClockString } from './utils/time';
 import { inferShipType, isCriticalStatus } from './utils/shipVisuals';
@@ -25,6 +26,7 @@ import { DrawZonesController } from './components/map/DrawZonesController';
 import {
   BottomCenterHud,
   BottomLeftHud,
+  PlaybackHud,
   TopCenterHud,
   TopRightUtcHud,
   TopLeftHud,
@@ -79,8 +81,49 @@ function mergeOperationalLog(prev, entry) {
 }
 
 export default function App() {
-  const { ships, threats, socketStatus, weather, zones, alerts } = useInterpolatedFleet();
-  const telemetryPulse = useTelemetryPulse(ships);
+  const {
+    ships: liveShips,
+    threats: liveThreats,
+    socketStatus,
+    weather: liveWeather,
+    zones: liveZones,
+    alerts,
+  } = useInterpolatedFleet();
+
+  const [historySnapshots, setHistorySnapshots] = useState([]);
+  const [replayIdx, setReplayIdx] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function pullHistory() {
+      try {
+        const r = await fetch(`${API_URL}/api/history`);
+        const data = await r.json();
+        if (!cancelled && Array.isArray(data)) setHistorySnapshots(data);
+      } catch {
+        /* offline — retain cached snapshots list */
+      }
+    }
+    pullHistory();
+    const id = setInterval(pullHistory, 45_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  const replaySnap =
+    replayIdx !== null && historySnapshots.length > 0 ? historySnapshots[replayIdx] : null;
+  const ships = replaySnap?.ships ?? liveShips;
+  const zones = replaySnap?.zones ?? liveZones;
+  const threats = replaySnap?.threats ?? liveThreats;
+  const weather = replaySnap?.weather ?? liveWeather;
+
+  const telemetryPulse = useTelemetryPulse(liveShips);
+
+  const [audioMuted, setAudioMuted] = useState(
+    () => typeof sessionStorage !== 'undefined' && sessionStorage.getItem('fleetAudioMuted') === '1'
+  );
 
   const [userRole, setUserRole] = useState('command');
   const [captainShipId, setCaptainShipId] = useState('');
@@ -108,8 +151,6 @@ export default function App() {
   const markerRefs = useRef({});
   const mapRef = useRef(null);
   const lastAlertAtRef = useRef(0);
-  const beepRef = useRef(null);
-  const highAlarmRef = useRef(null);
   const userRoleRef = useRef(userRole);
   const captainShipIdRef = useRef(captainShipId);
 
@@ -117,6 +158,24 @@ export default function App() {
     userRoleRef.current = userRole;
     captainShipIdRef.current = captainShipId;
   }, [userRole, captainShipId]);
+
+  useFleetSoundscape({
+    alerts,
+    ships: liveShips,
+    threats: liveThreats,
+    socketStatus,
+    audioMuted,
+    userRole,
+    captainShipId,
+  });
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('fleetAudioMuted', audioMuted ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+  }, [audioMuted]);
 
   useEffect(() => {
     const timer = setInterval(() => setUtcClock(utcClockString()), 1000);
@@ -150,6 +209,17 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (replayIdx === null) return;
+    if (!historySnapshots.length) {
+      setReplayIdx(null);
+      return;
+    }
+    if (replayIdx > historySnapshots.length - 1) {
+      setReplayIdx(historySnapshots.length - 1);
+    }
+  }, [historySnapshots, replayIdx]);
 
   const selectedShip = useMemo(
     () => ships.find((s) => s.shipId === selectedShipId) || null,
@@ -374,6 +444,37 @@ export default function App() {
       toast.success('Restricted zone added');
     } catch (error) {
       toast.error('Failed to add zone');
+    }
+  }
+
+  async function handleDeleteZone(zoneId) {
+    try {
+      const res = await fetch(`${API_URL}/api/zones/${encodeURIComponent(zoneId)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Delete failed');
+      }
+      toast.success('Zone removed');
+    } catch (error) {
+      toast.error(error.message || 'Failed to delete zone');
+    }
+  }
+
+  async function handleCaptainAcceptCourse() {
+    if (!captainShipId) return;
+    try {
+      const res = await fetch(`${API_URL}/api/ships/${captainShipId}/accept-course`, {
+        method: 'POST',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Accept course failed');
+      }
+      toast.success('Course accepted — heading synced on next telemetry tick');
+    } catch (error) {
+      toast.error(error.message || 'Accept course failed');
     }
   }
 
@@ -614,6 +715,10 @@ export default function App() {
           id: `distress-${receivedAt}-${Math.random().toString(36).slice(2, 9)}`,
           channel: 'distress',
           receivedAt,
+          severity,
+          injuries:
+            typeof latest.payload?.injuries === 'number' ? latest.payload.injuries : undefined,
+          problemType: latest.payload?.type || 'general',
           summaryLine:
             latest.payload?.summary ||
             `Distress (${severity}) — ${latest.payload?.shipId || 'unknown ship'}`,
@@ -653,21 +758,6 @@ export default function App() {
           [latest.payload.shipId]: Date.now(),
         }));
       }
-      if (severity === 'high') {
-        if (highAlarmRef.current) {
-          highAlarmRef.current.currentTime = 0;
-          highAlarmRef.current.play().catch(() => {});
-        } else if (beepRef.current) {
-          beepRef.current.currentTime = 0;
-          beepRef.current.play().catch(() => {});
-          setTimeout(() => {
-            if (beepRef.current) {
-              beepRef.current.currentTime = 0;
-              beepRef.current.play().catch(() => {});
-            }
-          }, 260);
-        }
-      }
     } else if (latest.type === 'fleet_advisor') {
       toast.error(latest.payload?.summary || 'Fleet advisor warning');
       setLatestRecommendation(latest.payload);
@@ -698,10 +788,6 @@ export default function App() {
       );
       if (p.kind === 'threat') {
         toast.error(msg, { duration: 8000 });
-        if (highAlarmRef.current) {
-          highAlarmRef.current.currentTime = 0;
-          highAlarmRef.current.play().catch(() => {});
-        }
       } else if (p.kind === 'caution') {
         toast(msg, {
           duration: 6000,
@@ -714,33 +800,44 @@ export default function App() {
         });
       }
     }
-    if (latest.type !== 'distress' && latest.type !== 'security' && beepRef.current) {
-      beepRef.current.currentTime = 0;
-      beepRef.current.play().catch(() => {});
-    }
   }, [alerts]);
 
   return (
     <div className={`layout ${sidebarOpen ? 'sidebar-open' : ''}`}>
-      <Toaster position="top-center" />
-      <audio
-        ref={beepRef}
-        preload="auto"
-        src="data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YRAAAAAA////AAAA////AAAA"
-      />
-      <audio
-        ref={highAlarmRef}
-        preload="auto"
-        src="data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YRAAAAAA////AAAA////AAAA"
+      <Toaster
+        position="top-center"
+        containerClassName="nv-toast-rail"
+        containerStyle={{ top: 96, zIndex: 1500 }}
+        toastOptions={{
+          duration: 4500,
+          className: 'nv-toast',
+        }}
+        gutter={10}
       />
       <div className={`map-wrap map-theme-${mapTheme}`}>
         <CommandSearch onRunCommand={handleRunCommand} />
         <div className="map-cinematic-overlay" aria-hidden="true" />
         <div className="map-grid-overlay" aria-hidden="true" />
-        <TopLeftHud socketStatus={socketStatus} shipsCount={ships.length} />
+        <div className="map-horizon" aria-hidden="true" />
+        <div className="map-vignette" aria-hidden="true" />
+        <div className="map-classification-strip" aria-hidden="true">
+          <span>// CLASSIFIED // NAVAL TACTICAL OPERATIONS // {mapTheme.toUpperCase()} OVERLAY //</span>
+        </div>
+        <TopLeftHud
+          socketStatus={socketStatus}
+          shipsCount={ships.length}
+          audioMuted={audioMuted}
+          onToggleAudioMute={() => setAudioMuted((v) => !v)}
+        />
         <TopRightUtcHud utcClock={utcClock} />
         <TopCenterHud windSpeed={weather.wind} />
         <BottomLeftHud cursorCoords={cursorCoords} />
+        <PlaybackHud
+          snapshots={historySnapshots}
+          replayIdx={replayIdx}
+          onReplayIdxChange={(idx) => setReplayIdx(idx)}
+          onLive={() => setReplayIdx(null)}
+        />
         <BottomCenterHud weather={weather} />
         <div className="hud-panel hud-top-right rounded-xl map-tools">
           {isMobile ? (
@@ -797,7 +894,7 @@ export default function App() {
             type="button"
             className="tool-btn"
             onClick={fitFleetView}
-            disabled={!mapRef.current || ships.length === 0}
+            disabled={!mapRef.current || liveShips.length === 0}
           >
             <LocateFixed size={14} />
             <span className="tool-label">Fit Fleet</span>
@@ -996,6 +1093,7 @@ export default function App() {
             markerRefs={markerRefs}
             followSelected={followSelected}
             focusNonce={focusNonce}
+            openPopupOnSelect={userRole !== 'command'}
           />
           <MapActionsController
             onReady={(map) => {
@@ -1028,7 +1126,7 @@ export default function App() {
         operationalLog={operationalLog}
         onClearOperationalLog={() => setOperationalLog([])}
         onDismissRecommendation={() => setLatestRecommendation(null)}
-        allShips={ships}
+        allShips={liveShips}
         selectedDarkThreatId={selectedDarkThreatId}
         onFocusThreat={handleFocusThreatOnMap}
         typeFilter={typeFilter}
@@ -1046,6 +1144,10 @@ export default function App() {
         distressMessage={distressMessage}
         onDistressChange={setDistressMessage}
         onSendDistress={handleSendDistress}
+        zones={zones}
+        onDeleteZone={userRole === 'command' ? handleDeleteZone : undefined}
+        onCaptainAcceptCourse={handleCaptainAcceptCourse}
+        replayActive={replayIdx !== null}
         isMobile={isMobile}
         onCloseMobile={() => setSidebarOpen(false)}
       />

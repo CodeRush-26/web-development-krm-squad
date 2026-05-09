@@ -44,13 +44,21 @@ Run the UI (default [http://localhost:5173](http://localhost:5173)):
 npm run client
 ```
 
-The client listens for **`fleet-update`** over Socket.io and shows live ship payloads. **`GET http://localhost:5050/api/ships`** returns the same in-memory snapshot.
+The client listens for **`fleet-update`** over Socket.io (WebSocket transport only in dev) and shows live ship payloads. **`GET http://localhost:5050/api/ships`** returns the same in-memory snapshot.
+
+REST additions:
+
+- **`GET /api/history`** — rolling snapshots (~30 s cadence, ~1 h retained) for playback UI.
+- **`DELETE /api/zones/:id`** — remove a restricted zone (Command workflow).
+- **`POST /api/ships/:shipId/accept-course`** — captain accepts assigned destination heading.
 
 Env reference: see **`server/.env.example`**.
 
 ---
 
 ### Docker Compose (whole stack)
+
+The assignment brief sometimes references **Next.js** and **FastAPI**; this repository ships **Vite + React** for the SPA and **Express + Socket.io** for the API/simulator. Dockerfiles match that stack (`client/Dockerfile`, `server/Dockerfile`).
 
 From the repo root:
 
@@ -96,6 +104,13 @@ Important files: `server/index.js`, `server/services/Simulator.js`, `server/data
 
 ---
 
-### API keys
+### API keys and optional integrations
 
-No third-party keys are required for the current phase. Document any weather/AI/env secrets here when they are added, and mirror variable names in `server/.env.example`.
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| **`MONGO_URI`** | Yes | Database connection string |
+| **`GEMINI_API_KEY`** | No | Distress + threat NLP when `LLM_PROVIDER` is `gemini` (default) |
+| **`XAI_API_KEY`** | No | Distress + threat NLP when `LLM_PROVIDER=xai` |
+| Open-Meteo | No | Simulator fetches weather from **Open-Meteo** public API (no key); tune coords via `WEATHER_LATITUDE` / `WEATHER_LONGITUDE` |
+
+See **`server/.env.example`** for full list including `CORS_ORIGINS`, weather parameter overrides, and model names.

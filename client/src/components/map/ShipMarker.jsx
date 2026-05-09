@@ -16,6 +16,8 @@ export const ShipMarker = memo(function ShipMarker({
   commandAnchor,
   commandTarget,
   onSelectShip,
+  /** COMMAND mode: vessel specs live in sidebar only (no Leaflet popup). */
+  suppressPopup = false,
 }) {
   const resolvedType = inferShipType(ship);
   const icon = useMemo(
@@ -55,23 +57,25 @@ export const ShipMarker = memo(function ShipMarker({
         },
       }}
     >
-      <Popup>
-        <strong>{ship.name}</strong>
-        <br />
-        Type: [{shipTypeCode(resolvedType)}] {TYPE_LABELS[resolvedType] || TYPE_LABELS.cargo}
-        <br />
-        Status: {ship.status}
-        <br />
-        Speed: {ship.speed} kn
-        <br />
-        Fuel: {ship.fuel.toFixed(1)} t
-        <br />
-        Env. Drag: -{(ship.envDrag ?? ship.envDragKnots ?? 0).toFixed(2)} kn
-        <br />
-        Destination: {ship.destination}
-        <br />
-        Cargo: {ship.cargo}
-      </Popup>
+      {!suppressPopup ? (
+        <Popup>
+          <strong>{ship.name}</strong>
+          <br />
+          Type: [{shipTypeCode(resolvedType)}] {TYPE_LABELS[resolvedType] || TYPE_LABELS.cargo}
+          <br />
+          Status: {ship.status}
+          <br />
+          Speed: {ship.speed} kn
+          <br />
+          Fuel: {ship.fuel.toFixed(1)} t
+          <br />
+          Env. Drag: -{(ship.envDrag ?? ship.envDragKnots ?? 0).toFixed(2)} kn
+          <br />
+          Destination: {ship.destination}
+          <br />
+          Cargo: {ship.cargo}
+        </Popup>
+      ) : null}
     </Marker>
   );
 });

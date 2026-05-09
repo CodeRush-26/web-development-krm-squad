@@ -18,6 +18,7 @@ import { createShipsRouter } from './routes/ships.routes.js';
 import { createZonesRouter } from './routes/zones.routes.js';
 import { createDistressRouter } from './routes/distress.routes.js';
 import { createThreatsRouter } from './routes/threats.routes.js';
+import { createHistoryRouter } from './routes/history.routes.js';
 import { Simulator } from './services/Simulator.js';
 import { GeminiService } from './services/GeminiService.js';
 
@@ -108,6 +109,7 @@ async function main() {
   app.use('/api/zones', createZonesRouter(simulator));
   app.use('/api/distress', createDistressRouter(geminiService, io, simulator));
   app.use('/api/threats', createThreatsRouter(simulator, geminiService));
+  app.use('/api/history', createHistoryRouter(simulator));
 
   simulator.start();
 

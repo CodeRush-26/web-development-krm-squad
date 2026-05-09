@@ -4,6 +4,7 @@ import { Router } from 'express';
  * @param {{
  *   getZonesPayload: () => unknown[];
  *   addRestrictedZone: (feature: any) => string;
+ *   removeRestrictedZone: (zoneId: string) => boolean;
  * }} simulator
  */
 export function createZonesRouter(simulator) {
@@ -26,6 +27,15 @@ export function createZonesRouter(simulator) {
 
     const id = simulator.addRestrictedZone(feature);
     res.status(201).json({ id });
+  });
+
+  router.delete('/:id', (req, res) => {
+    const removed = simulator.removeRestrictedZone(req.params.id);
+    if (!removed) {
+      res.status(404).json({ ok: false, error: 'zone not found' });
+      return;
+    }
+    res.json({ ok: true });
   });
 
   return router;

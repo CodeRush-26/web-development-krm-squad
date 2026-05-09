@@ -37,7 +37,7 @@ export function useInterpolatedFleet() {
       rafRef.current = requestAnimationFrame(renderFrame);
     }
 
-    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+    const socket = io(SOCKET_URL, { transports: ['websocket'] });
     socket.on('connect', () => setSocketStatus('connected'));
     socket.on('disconnect', () => setSocketStatus('disconnected'));
     socket.on('fleet-update', (payload) => {

@@ -190,6 +190,11 @@ export class Simulator {
     this.restrictedZones = [];
     this.lastAdvisorByShip = new Map();
 
+    /** ~30s cadence snapshots for playback API (cap 120 ≈ 1 h). */
+    this.tickCounter = 0;
+    /** @type {{ recordedAt: number; iso: string; ships: unknown[]; zones: unknown[]; threats: unknown[]; weather: unknown }[]} */
+    this.historySnapshots = [];
+
     /** Prevent overlapping Open-Meteo requests (e.g. start() + interval). */
     this._weatherFetchInFlight = false;
     /** Timestamp (ms) of last finished HTTP request to Open-Meteo (success or error). */
@@ -303,6 +308,45 @@ export class Simulator {
     return id;
   }
 
+  /** @returns {boolean} */
+  removeRestrictedZone(zoneId) {
+    const idx = this.restrictedZones.findIndex((z) => z.id === zoneId);
+    if (idx === -1) return false;
+    this.restrictedZones.splice(idx, 1);
+    this.io.emit('zones-updated', this.getZonesPayload());
+    this.broadcastFleetUpdate();
+    return true;
+  }
+
+  getHistorySnapshots() {
+    return this.historySnapshots.map((snap, idx) => ({
+      idx,
+      recordedAt: snap.recordedAt,
+      iso: snap.iso,
+      ships: snap.ships,
+      zones: snap.zones,
+      threats: snap.threats,
+      weather: snap.weather,
+    }));
+  }
+
+  /**
+   * Captain ACCEPT: snap heading toward assigned destination port (command directive already applied).
+   * @returns {Promise<boolean>}
+   */
+  async captainAcceptCourseToDestination(shipId) {
+    const ship = this.ships.find((s) => s.shipId === shipId);
+    if (!ship || !Simulator.canMoveStatus(ship.status)) return false;
+    const port = this.portsById[ship.destination];
+    if (!port) return false;
+    ship.heading = normalizeHeading(
+      turf.bearing(turf.point([ship.lng, ship.lat]), turf.point([port.lng, port.lat]))
+    );
+    await Ship.updateOne({ shipId }, { $set: { heading: ship.heading } }).exec();
+    this.broadcastFleetUpdate();
+    return true;
+  }
+
   registerDistressAlert(shipId, distress) {
     const ship = this.ships.find((s) => s.shipId === shipId);
     if (!ship) return false;
@@ -319,6 +363,7 @@ export class Simulator {
     if (!ship) return false;
     ship.destination = destination;
     await Ship.updateOne({ shipId }, { $set: { destination } }).exec();
+    this.broadcastFleetUpdate();
     return true;
   }
 
@@ -428,6 +473,20 @@ export class Simulator {
     }
   }
 
+  recordHistorySnapshot() {
+    this.historySnapshots.push({
+      recordedAt: Date.now(),
+      iso: new Date().toISOString(),
+      ships: JSON.parse(JSON.stringify(this.getFleetPayload())),
+      zones: JSON.parse(JSON.stringify(this.getZonesPayload())),
+      threats: JSON.parse(JSON.stringify(this.getThreatPayload())),
+      weather: JSON.parse(JSON.stringify(this.getWeatherPayload())),
+    });
+    while (this.historySnapshots.length > 120) {
+      this.historySnapshots.shift();
+    }
+  }
+
   start() {
     if (this.running) return;
     this.running = true;
@@ -438,6 +497,7 @@ export class Simulator {
     this.intervalId = setInterval(() => {
       void this.tick();
     }, TICK_MS);
+    this.recordHistorySnapshot();
     void this.tick();
   }
 
@@ -757,6 +817,11 @@ export class Simulator {
             });
           }
         }
+      }
+
+      this.tickCounter += 1;
+      if (this.tickCounter % 30 === 0) {
+        this.recordHistorySnapshot();
       }
 
       this.broadcastFleetUpdate();
