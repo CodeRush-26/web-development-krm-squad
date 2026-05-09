@@ -590,7 +590,10 @@
   animation: none;
 }
 
-/* === Alerts tab pane — host for AI recommendation + operational log ====== */
+/* === Alerts tab pane — host for AI recommendation + operational log ======
+   The pane itself scrolls so the operator can read every alert (advisory
+   text + complete operational log) without splitting visual context. Inner
+   panels render at natural height; the parent owns the scroll. ============ */
 
 .alerts-tab-pane {
   display: flex;
@@ -599,7 +602,26 @@
   padding: 12px 14px 14px;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+
+.alerts-tab-pane::-webkit-scrollbar {
+  width: 8px;
+}
+
+.alerts-tab-pane::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.alerts-tab-pane::-webkit-scrollbar-thumb {
+  background: rgba(99, 130, 170, 0.28);
+  border-radius: 999px;
+}
+
+.alerts-tab-pane::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 217, 255, 0.45);
 }
 
 /* Empty state — shown only when no recommendation and no log entries */
@@ -896,11 +918,14 @@
   overflow-y: auto;
 }
 
-/* When the recommendation panel sits inside the Alerts tab pane it must NOT
-   stretch to fill — the log panel needs to share space. */
+/* When the recommendation panel sits inside the Alerts tab pane it renders
+   at natural height — the parent .alerts-tab-pane owns the scroll so the
+   operator can read every advisory + every log line in one continuous
+   scroll. */
 .ai-recommendation-panel--in-tab {
   flex: 0 0 auto;
   overflow: visible;
+  margin: 0;
 }
 
 .ai-reco-title {
@@ -1020,11 +1045,20 @@
   overflow: hidden;
 }
 
-/* In the Alerts tab pane, the log panel takes the remaining height so its
-   internal list scrolls (recommendation panel sits above at natural size). */
+/* In the Alerts tab pane, the log panel renders at natural height — the
+   parent .alerts-tab-pane scrolls. The log list itself does NOT scroll
+   independently, so all entries flow with the recommendation card above. */
 .operational-log-panel--in-tab {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   margin: 0;
+  overflow: visible;
+}
+
+.operational-log-panel--in-tab .operational-log-list {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
 }
 
 .operational-log-header {
