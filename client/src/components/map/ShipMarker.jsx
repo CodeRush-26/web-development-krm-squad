@@ -6,11 +6,12 @@ export const ShipMarker = memo(function ShipMarker({
   ship,
   markerRefs,
   highlighted,
+  distressPulse,
   onSelectShip,
 }) {
   const icon = useMemo(
-    () => createShipIcon(ship.heading, ship.status, highlighted),
-    [ship.heading, ship.status, highlighted]
+    () => createShipIcon(ship.heading, ship.status, highlighted, distressPulse),
+    [ship.heading, ship.status, highlighted, distressPulse]
   );
 
   return (

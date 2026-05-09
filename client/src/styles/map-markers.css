@@ -61,6 +61,11 @@
   filter: brightness(1.35);
 }
 
+.ship-marker.distress-pulse .ship-pulse {
+  animation: distressPulse 0.6s ease-out infinite;
+  border-width: 2px;
+}
+
 @keyframes sonar {
   0% {
     transform: scale(0.55);
@@ -68,6 +73,17 @@
   }
   100% {
     transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+@keyframes distressPulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.95;
+  }
+  100% {
+    transform: scale(2.2);
     opacity: 0;
   }
 }

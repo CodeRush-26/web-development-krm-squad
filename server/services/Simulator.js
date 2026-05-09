@@ -45,6 +45,7 @@ function docToRamShip(doc) {
     envDrag: 0,
     envDragKnots: 0,
     fuelConsumptionTick: 0,
+    distress: null,
     _prevStatus: o.status,
   };
 }
@@ -60,6 +61,7 @@ function ramToPayload(s) {
     envDrag: s.envDrag,
     envDragKnots: s.envDragKnots,
     fuelConsumptionTick: s.fuelConsumptionTick,
+    distress: s.distress,
     heading: s.heading,
     destination: s.destination,
     fuel: s.fuel,
@@ -154,6 +156,17 @@ export class Simulator {
     this.restrictedZones.push({ id, feature: { ...feature, type: 'Feature' } });
     this.io.emit('zones-updated', this.getZonesPayload());
     return id;
+  }
+
+  registerDistressAlert(shipId, distress) {
+    const ship = this.ships.find((s) => s.shipId === shipId);
+    if (!ship) return false;
+    ship.distress = {
+      ...distress,
+      active: true,
+      updatedAt: new Date().toISOString(),
+    };
+    return true;
   }
 
   async refreshWeather() {

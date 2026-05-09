@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-export function createDistressRouter(geminiService) {
+export function createDistressRouter(geminiService, io, simulator) {
   const router = Router();
 
   router.get('/probe', (_req, res) =>
@@ -11,10 +11,18 @@ export function createDistressRouter(geminiService) {
     try {
       const { shipId, message } = req.body ?? {};
       const result = await geminiService.analyzeDistressMessage(message);
-      return res.json({
-        ok: true,
+      const payload = {
         shipId: shipId ?? null,
         ...result,
+        at: Date.now(),
+      };
+      if (shipId) {
+        simulator?.registerDistressAlert(shipId, result);
+      }
+      io?.emit('new-distress-alert', payload);
+      return res.json({
+        ok: true,
+        ...payload,
       });
     } catch (error) {
       return res.status(500).json({

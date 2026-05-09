@@ -32,7 +32,7 @@ export function fuelPercent(ship) {
   return Math.max(0, Math.min(100, (ship.fuel / maxFuelForBar) * 100));
 }
 
-export function createShipIcon(heading, status, highlighted) {
+export function createShipIcon(heading, status, highlighted, distressPulse = false) {
   const toneClass =
     status === 'proximity_warning'
       ? 'warning'
@@ -40,13 +40,14 @@ export function createShipIcon(heading, status, highlighted) {
         ? 'alert'
         : 'normal';
   const highlightedClass = highlighted ? 'highlighted' : '';
+  const distressPulseClass = distressPulse ? 'distress-pulse' : '';
 
   return L.divIcon({
     className: 'ship-icon-wrap',
     iconSize: [32, 32],
     iconAnchor: [16, 16],
     html: `
-      <div class="ship-marker ${toneClass} ${highlightedClass}">
+      <div class="ship-marker ${toneClass} ${highlightedClass} ${distressPulseClass}">
         <div class="ship-pulse"></div>
         <div class="ship-rotation" style="transform: rotate(${heading}deg)">
           <svg viewBox="0 0 100 100" class="ship-svg" aria-hidden="true">

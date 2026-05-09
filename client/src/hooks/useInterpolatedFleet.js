@@ -109,6 +109,12 @@ export function useInterpolatedFleet() {
         { type: 'geofence', payload, at: Date.now() },
       ]);
     });
+    socket.on('new-distress-alert', (payload) => {
+      setAlerts((prev) => [
+        ...prev.slice(-20),
+        { type: 'distress', payload, at: Date.now() },
+      ]);
+    });
 
     rafRef.current = requestAnimationFrame(renderFrame);
     return () => {

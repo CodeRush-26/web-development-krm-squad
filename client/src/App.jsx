@@ -36,11 +36,13 @@ export default function App() {
   const [focusNonce, setFocusNonce] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [distressPulseByShip, setDistressPulseByShip] = useState({});
 
   const markerRefs = useRef({});
   const mapRef = useRef(null);
   const lastAlertAtRef = useRef(0);
   const beepRef = useRef(null);
+  const highAlarmRef = useRef(null);
 
   useEffect(() => {
     const timer = setInterval(() => setUtcClock(utcClockString()), 1000);
@@ -165,7 +167,7 @@ export default function App() {
       if (!response.ok || !data?.ok) {
         throw new Error(data?.error || 'Distress analysis failed');
       }
-      toast.success(`AI ${data.severity}: ${data.summary}`);
+      toast.success('Distress transmitted to command');
     } catch (error) {
       toast.error(error.message || 'Distress analysis failed');
     }
@@ -183,8 +185,36 @@ export default function App() {
       );
     } else if (latest.type === 'geofence') {
       toast.error(`Geofence breach: ${latest.payload.shipId}`);
+    } else if (latest.type === 'distress') {
+      const severity = latest.payload?.severity || 'medium';
+      const border = severity === 'high' ? '#ff2d55' : '#f59e0b';
+      toast.error(
+        `Severity: ${severity.toUpperCase()} | Type: ${String(latest.payload?.type || 'general')}`,
+        { style: { border: `2px solid ${border}`, boxShadow: `0 0 12px ${border}` } }
+      );
+      if (latest.payload?.shipId) {
+        setDistressPulseByShip((prev) => ({
+          ...prev,
+          [latest.payload.shipId]: Date.now(),
+        }));
+      }
+      if (severity === 'high') {
+        if (highAlarmRef.current) {
+          highAlarmRef.current.currentTime = 0;
+          highAlarmRef.current.play().catch(() => {});
+        } else if (beepRef.current) {
+          beepRef.current.currentTime = 0;
+          beepRef.current.play().catch(() => {});
+          setTimeout(() => {
+            if (beepRef.current) {
+              beepRef.current.currentTime = 0;
+              beepRef.current.play().catch(() => {});
+            }
+          }, 260);
+        }
+      }
     }
-    if (beepRef.current) {
+    if (latest.type !== 'distress' && beepRef.current) {
       beepRef.current.currentTime = 0;
       beepRef.current.play().catch(() => {});
     }
@@ -195,6 +225,11 @@ export default function App() {
       <Toaster position="top-center" />
       <audio
         ref={beepRef}
+        preload="auto"
+        src="data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YRAAAAAA////AAAA////AAAA"
+      />
+      <audio
+        ref={highAlarmRef}
         preload="auto"
         src="data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YRAAAAAA////AAAA////AAAA"
       />
@@ -300,6 +335,10 @@ export default function App() {
               ship={ship}
               markerRefs={markerRefs}
               highlighted={hoveredShipId === ship.shipId}
+              distressPulse={
+                ship?.distress?.active ||
+                (Date.now() - (distressPulseByShip[ship.shipId] || 0) < 6000)
+              }
               onSelectShip={handleSelectShip}
             />
           ))}

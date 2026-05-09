@@ -87,7 +87,7 @@ async function main() {
   app.use('/api/ships', createShipsRouter(simulator));
   app.use('/api/navigable-water', createNavigableWaterRouter(nwDoc));
   app.use('/api/zones', createZonesRouter(simulator));
-  app.use('/api/distress', createDistressRouter(geminiService));
+  app.use('/api/distress', createDistressRouter(geminiService, io, simulator));
 
   simulator.start();
 
