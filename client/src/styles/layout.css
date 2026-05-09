@@ -1,0 +1,17 @@
+﻿.layout {
+  display: grid;
+  grid-template-columns: 1fr 356px;
+  width: 100%;
+  height: 100%;
+  background: #020617;
+}
+
+.map-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.fleet-map {
+  width: 100%;
+  height: 100%;
+}

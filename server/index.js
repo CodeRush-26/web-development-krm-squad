@@ -9,6 +9,7 @@ import Ship from './models/Ship.js';
 import NavigableWater from './models/NavigableWater.js';
 import { resolveCorsOrigins } from './config/cors.config.js';
 import { createHealthRouter } from './routes/health.routes.js';
+import { createNavigableWaterRouter } from './routes/navigable-water.routes.js';
 import { createShipsRouter } from './routes/ships.routes.js';
 import { Simulator } from './services/Simulator.js';
 
@@ -66,6 +67,7 @@ async function main() {
 
   app.use(createHealthRouter());
   app.use('/api/ships', createShipsRouter(simulator));
+  app.use('/api/navigable-water', createNavigableWaterRouter(nwDoc));
 
   simulator.start();
 

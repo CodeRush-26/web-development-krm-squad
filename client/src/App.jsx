@@ -1,43 +1,107 @@
-import { useEffect, useState } from 'react';
-import { io } from 'socket.io-client';
-
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://127.0.0.1:5050';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { GeoJSON, MapContainer, TileLayer } from 'react-leaflet';
+import { API_URL, MAP_CENTER, MAP_ZOOM } from './constants/fleet';
+import { useInterpolatedFleet } from './hooks/useInterpolatedFleet';
+import { useTelemetryPulse } from './hooks/useTelemetryPulse';
+import { utcClockString } from './utils/time';
+import { ShipMarker } from './components/map/ShipMarker';
+import { MapFocusController } from './components/map/MapFocusController';
+import { CursorHudController } from './components/map/CursorHudController';
+import {
+  BottomCenterHud,
+  BottomLeftHud,
+  TopCenterHud,
+  TopLeftHud,
+} from './components/hud/HudPanels';
+import { CommandSidebar } from './components/sidebar/CommandSidebar';
 
 export default function App() {
-  const [ships, setShips] = useState([]);
-  const [status, setStatus] = useState('connecting');
+  const { ships, socketStatus } = useInterpolatedFleet();
+  const telemetryPulse = useTelemetryPulse(ships);
+
+  const [selectedShipId, setSelectedShipId] = useState('');
+  const [hoveredShipId, setHoveredShipId] = useState('');
+  const [navigableWater, setNavigableWater] = useState(null);
+  const [cursorCoords, setCursorCoords] = useState(MAP_CENTER);
+  const [utcClock, setUtcClock] = useState(utcClockString());
+
+  const markerRefs = useRef({});
 
   useEffect(() => {
-    const socket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
-    });
+    const timer = setInterval(() => setUtcClock(utcClockString()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-    socket.on('connect', () => setStatus('connected'));
-    socket.on('disconnect', () => setStatus('disconnected'));
-    socket.on('fleet-update', (fleet) => {
-      setShips(Array.isArray(fleet) ? fleet : []);
-    });
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch(`${API_URL}/api/navigable-water`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) setNavigableWater(data);
+      })
+      .catch((err) => {
+        console.error('Failed to load navigable water:', err);
+      });
 
     return () => {
-      socket.disconnect();
+      cancelled = true;
     };
   }, []);
 
+  const selectedShip = useMemo(
+    () => ships.find((s) => s.shipId === selectedShipId) || null,
+    [selectedShipId, ships]
+  );
+
   return (
-    <div style={{ fontFamily: 'system-ui', padding: '1rem' }}>
-      <h1>Fleet (MERN scaffold)</h1>
-      <p>
-        Socket: <strong>{status}</strong> — updates via <code>fleet-update</code> (1 Hz)
-      </p>
-      <p>Ships on wire: {ships.length}</p>
-      <ul>
-        {ships.map((s) => (
-          <li key={s.shipId}>
-            {s.shipId} {s.name} — pos [{s.position?.[0]?.toFixed(4)},{' '}
-            {s.position?.[1]?.toFixed(4)}], {s.speed} kn @ {s.heading}°
-          </li>
-        ))}
-      </ul>
+    <div className="layout">
+      <div className="map-wrap">
+        <TopLeftHud socketStatus={socketStatus} shipsCount={ships.length} />
+        <TopCenterHud utcClock={utcClock} />
+        <BottomLeftHud cursorCoords={cursorCoords} />
+        <BottomCenterHud />
+
+        <MapContainer className="fleet-map" center={MAP_CENTER} zoom={MAP_ZOOM}>
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; CartoDB'
+            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          />
+
+          {navigableWater ? (
+            <GeoJSON
+              data={navigableWater}
+              style={{
+                color: '#38bdf8',
+                weight: 1.4,
+                fillColor: '#0ea5e9',
+                fillOpacity: 0.14,
+              }}
+            />
+          ) : null}
+
+          {ships.map((ship) => (
+            <ShipMarker
+              key={ship.shipId}
+              ship={ship}
+              markerRefs={markerRefs}
+              highlighted={hoveredShipId === ship.shipId}
+            />
+          ))}
+
+          <MapFocusController selectedShip={selectedShip} markerRefs={markerRefs} />
+          <CursorHudController onMove={setCursorCoords} />
+        </MapContainer>
+      </div>
+
+      <CommandSidebar
+        ships={ships}
+        selectedShipId={selectedShipId}
+        setSelectedShipId={setSelectedShipId}
+        setHoveredShipId={setHoveredShipId}
+        telemetryPulse={telemetryPulse}
+        socketStatus={socketStatus}
+      />
     </div>
   );
 }
