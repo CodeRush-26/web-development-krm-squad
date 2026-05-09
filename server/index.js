@@ -92,6 +92,7 @@ async function main() {
   simulator.start();
 
   server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
     console.log(`HTTP + Socket.io listening on port ${PORT}`);
     console.log(`CORS: ${allowedOrigins.join(', ')}`);
   });

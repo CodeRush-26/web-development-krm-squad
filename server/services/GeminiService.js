@@ -27,35 +27,51 @@ export class GeminiService {
     }
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${this.apiKey}`;
+    const prompt = `Classify this vessel distress message into severity {low|medium|high|critical} and summarize in one sentence:\n${message}`;
+    console.log('Gemini Prompt:', prompt);
+
     const body = {
       contents: [
         {
           role: 'user',
           parts: [
             {
-              text: `Classify this vessel distress message into severity {low|medium|high|critical} and summarize in one sentence:\n${message}`,
+              text: prompt,
             },
           ],
         },
       ],
     };
 
-    const { data } = await axios.post(url, body, { timeout: 10000 });
-    console.log('Gemini Raw Response:', data);
-    const text =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-      'No AI summary returned.';
+    try {
+      const { data } = await axios.post(url, body, { timeout: 10000 });
+      console.log('Gemini Raw Response:', data);
+      const text =
+        data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+        'No AI summary returned.';
 
-    return {
-      severity: /critical/i.test(text)
-        ? 'critical'
-        : /high/i.test(text)
-          ? 'high'
-          : /medium/i.test(text)
-            ? 'medium'
-            : 'low',
-      summary: text,
-      source: GEMINI_MODEL,
-    };
+      return {
+        severity: /critical/i.test(text)
+          ? 'critical'
+          : /high/i.test(text)
+            ? 'high'
+            : /medium/i.test(text)
+              ? 'medium'
+              : 'low',
+        summary: text,
+        source: GEMINI_MODEL,
+      };
+    } catch (error) {
+      const status = error?.response?.status;
+      const responseBody = error?.response?.data;
+      console.error('Gemini request failed:', status || error.message, responseBody);
+      return {
+        severity: /bleeding|evac|emergency|critical|mayday/i.test(message)
+          ? 'critical'
+          : 'medium',
+        summary: `AI fallback: ${message.slice(0, 140)}`,
+        source: 'local-fallback-after-error',
+      };
+    }
   }
 }
