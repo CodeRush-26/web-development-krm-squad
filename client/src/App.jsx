@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { GeoJSON, MapContainer, TileLayer } from 'react-leaflet';
-import { Compass, LocateFixed, Orbit } from 'lucide-react';
+import { Compass, LocateFixed, Menu, Orbit, X } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import { API_URL, MAP_CENTER, MAP_ZOOM } from './constants/fleet';
 import { useInterpolatedFleet } from './hooks/useInterpolatedFleet';
@@ -10,6 +10,7 @@ import { ShipMarker } from './components/map/ShipMarker';
 import { MapFocusController } from './components/map/MapFocusController';
 import { CursorHudController } from './components/map/CursorHudController';
 import { MapActionsController } from './components/map/MapActionsController';
+import { MapViewportController } from './components/map/MapViewportController';
 import { DrawZonesController } from './components/map/DrawZonesController';
 import {
   BottomCenterHud,
@@ -33,6 +34,8 @@ export default function App() {
   const [utcClock, setUtcClock] = useState(utcClockString());
   const [followSelected, setFollowSelected] = useState(false);
   const [focusNonce, setFocusNonce] = useState(0);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   const markerRefs = useRef({});
   const mapRef = useRef(null);
@@ -42,6 +45,17 @@ export default function App() {
   useEffect(() => {
     const timer = setInterval(() => setUtcClock(utcClockString()), 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 1100px)');
+    const sync = () => {
+      setIsMobile(media.matches);
+      setSidebarOpen(!media.matches);
+    };
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
   }, []);
 
   useEffect(() => {
@@ -158,7 +172,7 @@ export default function App() {
   }, [alerts]);
 
   return (
-    <div className="layout">
+    <div className={`layout ${sidebarOpen ? 'sidebar-open' : ''}`}>
       <Toaster position="top-center" />
       <audio
         ref={beepRef}
@@ -171,6 +185,16 @@ export default function App() {
         <BottomLeftHud cursorCoords={cursorCoords} />
         <BottomCenterHud weather={weather} />
         <div className="hud-panel hud-top-right rounded-xl map-tools">
+          {isMobile ? (
+            <button
+              type="button"
+              className="tool-btn mobile-only"
+              onClick={() => setSidebarOpen((v) => !v)}
+            >
+              {sidebarOpen ? <X size={14} /> : <Menu size={14} />}
+              {sidebarOpen ? 'Close Panel' : 'Open Panel'}
+            </button>
+          ) : null}
           <button
             type="button"
             className="tool-btn"
@@ -275,9 +299,22 @@ export default function App() {
               mapRef.current = map;
             }}
           />
+          <MapViewportController
+            sidebarOpen={sidebarOpen}
+            isMobile={isMobile}
+          />
           <CursorHudController onMove={setCursorCoords} />
         </MapContainer>
       </div>
+
+      {isMobile && sidebarOpen ? (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label="Close panel"
+          onClick={() => setSidebarOpen(false)}
+        />
+      ) : null}
 
       <CommandSidebar
         ships={visibleShips}
@@ -292,6 +329,8 @@ export default function App() {
         onCaptainShipChange={setCaptainShipId}
         distressMessage={distressMessage}
         onDistressChange={setDistressMessage}
+        isMobile={isMobile}
+        onCloseMobile={() => setSidebarOpen(false)}
       />
     </div>
   );

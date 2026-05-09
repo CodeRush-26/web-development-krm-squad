@@ -21,6 +21,8 @@ export function CommandSidebar({
   distressMessage,
   onDistressChange,
   allShips = ships,
+  isMobile,
+  onCloseMobile,
 }) {
   return (
     <aside className="sidebar rounded-xl">
@@ -32,6 +34,11 @@ export function CommandSidebar({
         <span className="sidebar-right">
           <ShipIcon size={16} /> {ships.length}
         </span>
+        {isMobile ? (
+          <button type="button" className="tool-btn mobile-only" onClick={onCloseMobile}>
+            Close
+          </button>
+        ) : null}
       </div>
       {userRole === 'captain' ? (
         <div className="captain-controls">
