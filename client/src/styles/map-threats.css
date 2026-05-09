@@ -68,6 +68,15 @@
   font-weight: 600;
 }
 
+/* 10 km radar circles — enforce dashed stroke (Leaflet + SVG safe fallback). */
+.leaflet-overlay-pane svg path.leaflet-radar-ring {
+  fill: none !important;
+  stroke-dasharray: 22 16 !important;
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+  pointer-events: none !important;
+}
+
 .leaflet-radar-ring {
   pointer-events: none;
 }

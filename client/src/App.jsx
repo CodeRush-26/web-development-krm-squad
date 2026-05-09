@@ -1,5 +1,12 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Circle, GeoJSON, MapContainer, Polyline, TileLayer } from 'react-leaflet';
+import {
+  Circle,
+  GeoJSON,
+  MapContainer,
+  Polyline,
+  TileLayer,
+  Tooltip,
+} from 'react-leaflet';
 import { Compass, FilterX, LocateFixed, Menu, Orbit, X } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import { API_URL, MAP_CENTER, MAP_ZOOM, PORTS } from './constants/fleet';
@@ -82,6 +89,13 @@ export default function App() {
   const lastAlertAtRef = useRef(0);
   const beepRef = useRef(null);
   const highAlarmRef = useRef(null);
+  const userRoleRef = useRef(userRole);
+  const captainShipIdRef = useRef(captainShipId);
+
+  useEffect(() => {
+    userRoleRef.current = userRole;
+    captainShipIdRef.current = captainShipId;
+  }, [userRole, captainShipId]);
 
   useEffect(() => {
     const timer = setInterval(() => setUtcClock(utcClockString()), 1000);
@@ -129,6 +143,14 @@ export default function App() {
     return ships.filter((s) => inferShipType(s) === typeFilter);
   }, [captainShipId, ships, userRole, typeFilter]);
 
+  const sidebarRecommendation = useMemo(() => {
+    if (!latestRecommendation) return null;
+    if (userRole === 'captain' && captainShipId) {
+      return latestRecommendation.shipId === captainShipId ? latestRecommendation : null;
+    }
+    return latestRecommendation;
+  }, [captainShipId, latestRecommendation, userRole]);
+
   const commandFilterSet = useMemo(
     () => (commandFilterShipIds ? new Set(commandFilterShipIds) : null),
     [commandFilterShipIds]
@@ -147,6 +169,20 @@ export default function App() {
     const n = ships.find((s) => s.shipId === commandProximity.nearestShipId);
     if (!a || !n) return null;
     return [a.position, n.position];
+  }, [commandProximity, ships]);
+
+  const commandProximityLive = useMemo(() => {
+    if (!commandProximity) return null;
+    const a = ships.find((s) => s.shipId === commandProximity.anchorShipId);
+    const n = ships.find((s) => s.shipId === commandProximity.nearestShipId);
+    if (!a || !n) return null;
+    const km = kmBetween(a.position, n.position);
+    return {
+      km,
+      nm: km / 1.852,
+      anchorName: a.name,
+      nearestName: n.name,
+    };
   }, [commandProximity, ships]);
 
   useEffect(() => {
@@ -410,8 +446,8 @@ export default function App() {
       setFocusNonce((n) => n + 1);
       zoomToShipCluster(ids);
       toast.success(
-        `Nearest to ${anchor.name}: ${nearest.name} (~${nm.toFixed(1)} nm, ${bestKm.toFixed(1)} km). Amber ring = reference ship · Green ring = closest.`,
-        { duration: 5500 }
+        `Nearest to ${anchor.name}: ${nearest.name} (~${nm.toFixed(1)} nm, ${bestKm.toFixed(1)} km). Amber ring = reference ship · Green ring = closest. Distance stays in the toolbar and on the line until you clear focus.`,
+        { duration: 6500 }
       );
       return;
     }
@@ -462,6 +498,35 @@ export default function App() {
     const latest = alerts[alerts.length - 1];
     if (!latest || latest.at <= lastAlertAtRef.current) return;
     lastAlertAtRef.current = latest.at;
+
+    const role = userRoleRef.current;
+    const capId = captainShipIdRef.current;
+    const captainActive = role === 'captain' && !!capId;
+    const payload = latest.payload || {};
+
+    if (captainActive) {
+      let allow = true;
+      switch (latest.type) {
+        case 'proximity':
+          allow = (payload.ships || []).includes(capId);
+          break;
+        case 'geofence':
+          allow = payload.shipId === capId;
+          break;
+        case 'distress':
+          allow = payload.shipId == null || payload.shipId === capId;
+          break;
+        case 'fleet_advisor':
+          allow = payload.shipId === capId;
+          break;
+        case 'security':
+          allow = false;
+          break;
+        default:
+          allow = true;
+      }
+      if (!allow) return;
+    }
 
     if (latest.type === 'proximity') {
       toast.error(
@@ -600,6 +665,21 @@ export default function App() {
               <span className="tool-label">Clear focus</span>
             </button>
           ) : null}
+          {commandProximityLive ? (
+            <div
+              className="command-proximity-hud-chip"
+              role="status"
+              aria-live="polite"
+              title="Live separation along the green dashed line"
+            >
+              <span className="command-proximity-hud-names">
+                {commandProximityLive.anchorName} ↔ {commandProximityLive.nearestName}
+              </span>
+              <span className="command-proximity-hud-dist">
+                {commandProximityLive.nm.toFixed(1)} nm · {commandProximityLive.km.toFixed(1)} km
+              </span>
+            </div>
+          ) : null}
           <button
             type="button"
             className="tool-btn"
@@ -702,11 +782,16 @@ export default function App() {
                   interactive={false}
                   pathOptions={{
                     className: 'leaflet-radar-ring',
-                    color: 'rgba(103, 232, 249, 0.42)',
-                    weight: 1,
-                    opacity: 0.75,
+                    stroke: true,
+                    color: 'rgba(103, 232, 249, 0.58)',
+                    weight: 1.35,
+                    opacity: 0.92,
+                    fill: false,
                     fillOpacity: 0,
-                    dashArray: '6 12',
+                    fillColor: 'transparent',
+                    dashArray: '22 16',
+                    lineCap: 'round',
+                    lineJoin: 'round',
                   }}
                 />
               ))
@@ -776,7 +861,25 @@ export default function App() {
                 opacity: 0.92,
                 lineCap: 'round',
               }}
-            />
+            >
+              {commandProximityLive ? (
+                <Tooltip
+                  permanent
+                  direction="center"
+                  opacity={1}
+                  className="command-proximity-distance-tip"
+                >
+                  <div className="command-proximity-distance-inner">
+                    <div className="command-proximity-distance-names">
+                      {commandProximityLive.anchorName} ↔ {commandProximityLive.nearestName}
+                    </div>
+                    <div className="command-proximity-distance-values">
+                      {commandProximityLive.nm.toFixed(1)} nm · {commandProximityLive.km.toFixed(1)} km
+                    </div>
+                  </div>
+                </Tooltip>
+              ) : null}
+            </Polyline>
           ) : null}
 
           <DrawZonesController
@@ -822,7 +925,7 @@ export default function App() {
         onFocusThreat={handleFocusThreatOnMap}
         typeFilter={typeFilter}
         onTypeFilterChange={setTypeFilter}
-        latestRecommendation={latestRecommendation}
+        latestRecommendation={sidebarRecommendation}
         onApplyRecommendation={applyRecommendation}
         selectedShipId={selectedShipId}
         onSelectShip={handleSelectShip}
