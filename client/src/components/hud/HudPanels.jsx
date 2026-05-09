@@ -35,10 +35,12 @@ export function BottomLeftHud({ cursorCoords }) {
 }
 
 export function BottomCenterHud({ weather }) {
+  const syncIso = weather?.lastSuccessfulSync || weather?.updatedAt;
+  const lastSyncLabel = syncIso ? new Date(syncIso).toLocaleTimeString() : 'never';
   return (
     <div className="hud-panel hud-bottom-center rounded-xl hud-mono">
       <Wind size={14} /> Wind: {(weather?.wind ?? 0).toFixed(1)} kts | Waves:{' '}
-      {(weather?.waves ?? 0).toFixed(2)} m
+      {(weather?.waves ?? 0).toFixed(2)} m | Last Sync: {lastSyncLabel}
     </div>
   );
 }

@@ -30,8 +30,8 @@
   .sidebar {
     position: absolute;
     right: 12px;
-    top: 12px;
-    bottom: 12px;
+    top: 10px;
+    bottom: 10px;
     width: min(92vw, 380px);
     margin: 0;
     z-index: 1200;
@@ -49,5 +49,19 @@
     background: rgba(2, 6, 23, 0.48);
     border: 0;
     z-index: 1100;
+  }
+}
+
+@media (max-width: 700px) {
+  .leaflet-top.leaflet-left {
+    margin-top: 54px;
+    margin-left: 6px;
+  }
+
+  .sidebar {
+    width: calc(100vw - 16px);
+    right: 8px;
+    top: 8px;
+    bottom: 8px;
   }
 }

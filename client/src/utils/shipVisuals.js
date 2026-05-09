@@ -11,6 +11,7 @@ export function isCriticalStatus(status) {
 
 export function statusDotClass(status) {
   if (status === 'normal') return 'dot green';
+  if (status === 'proximity_warning') return 'dot orange';
   if (isCriticalStatus(status)) return 'dot red';
   return 'dot amber';
 }
@@ -32,7 +33,12 @@ export function fuelPercent(ship) {
 }
 
 export function createShipIcon(heading, status, highlighted) {
-  const toneClass = isCriticalStatus(status) ? 'alert' : 'normal';
+  const toneClass =
+    status === 'proximity_warning'
+      ? 'warning'
+      : isCriticalStatus(status)
+        ? 'alert'
+        : 'normal';
   const highlightedClass = highlighted ? 'highlighted' : '';
 
   return L.divIcon({

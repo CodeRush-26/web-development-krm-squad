@@ -52,6 +52,10 @@
   color: #f43f5e;
 }
 
+.ship-marker.warning {
+  color: #f59e0b;
+}
+
 .ship-marker.highlighted {
   transform: scale(1.2);
   filter: brightness(1.35);

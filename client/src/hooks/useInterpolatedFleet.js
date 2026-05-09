@@ -5,7 +5,13 @@ import { SOCKET_URL, TICK_MS } from '../constants/fleet';
 export function useInterpolatedFleet() {
   const [socketStatus, setSocketStatus] = useState('connecting');
   const [ships, setShips] = useState([]);
-  const [weather, setWeather] = useState({ wind: 0, waves: 0 });
+  const [weather, setWeather] = useState({
+    wind: 0,
+    waves: 0,
+    updatedAt: null,
+    lastSuccessfulSync: null,
+    source: 'unknown',
+  });
   const [zones, setZones] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const framesRef = useRef({});
@@ -67,6 +73,9 @@ export function useInterpolatedFleet() {
         setWeather({
           wind: Number(weatherPayload.wind) || 0,
           waves: Number(weatherPayload.waves) || 0,
+          updatedAt: weatherPayload.updatedAt ?? null,
+          lastSuccessfulSync: weatherPayload.lastSuccessfulSync ?? null,
+          source: weatherPayload.source ?? 'unknown',
         });
       }
       if (Array.isArray(zonesPayload)) {

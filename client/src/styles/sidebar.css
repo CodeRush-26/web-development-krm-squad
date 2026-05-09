@@ -137,6 +137,11 @@
   background: #fbbf24;
 }
 
+.dot.orange {
+  background: #f59e0b;
+  box-shadow: 0 0 9px rgba(245, 158, 11, 0.9);
+}
+
 .telemetry-row {
   margin-top: 8px;
   display: flex;

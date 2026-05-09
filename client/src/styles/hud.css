@@ -94,6 +94,10 @@
   scrollbar-width: thin;
 }
 
+.tool-label {
+  white-space: nowrap;
+}
+
 .role-toggle {
   display: inline-flex;
   gap: 6px;
@@ -108,7 +112,8 @@
   }
 
   .hud-top-right {
-    top: 96px;
+    top: auto;
+    bottom: 56px;
     right: 12px;
     left: 12px;
     max-width: none;
@@ -135,7 +140,8 @@
     left: auto;
     right: 10px;
     transform: none;
-    max-width: 56vw;
+    max-width: 52vw;
+    padding: 8px 10px;
   }
 
   .hud-top-left {
@@ -146,10 +152,28 @@
   }
 
   .hud-top-right {
-    top: 68px;
+    bottom: 54px;
     right: 8px;
     left: 8px;
-    padding: 8px 10px;
+    padding: 7px 9px;
+  }
+
+  .map-tools {
+    gap: 6px;
+  }
+
+  .role-toggle {
+    margin-left: 2px;
+  }
+
+  .tool-btn {
+    border-radius: 9px;
+    padding: 6px 7px;
+  }
+
+  .role-toggle .tool-btn .tool-label {
+    font-size: 10px;
+    letter-spacing: 0.03em;
   }
 }
 

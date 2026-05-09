@@ -5,8 +5,18 @@ import Ship from '../models/Ship.js';
 const TICK_MS = 1000;
 const WEATHER_REFRESH_MS = 5 * 60 * 1000;
 const PROXIMITY_KM = 2;
-const WEATHER_URL =
-  'https://api.open-meteo.com/v1/forecast?latitude=26.0&longitude=55.0&current=wind_speed_10m,wave_height';
+const DEFAULT_WEATHER = {
+  wind: 15,
+  waves: 1,
+};
+
+function buildWeatherUrl() {
+  const latitude = num(process.env.WEATHER_LATITUDE, 26.0);
+  const longitude = num(process.env.WEATHER_LONGITUDE, 55.0);
+  const requested = process.env.WEATHER_CURRENT_PARAMS || 'wind_speed_10m,wave_height';
+  const params = encodeURIComponent(requested);
+  return `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=${params}`;
+}
 
 function num(v, fallback) {
   const n = Number(v);
@@ -32,7 +42,9 @@ function docToRamShip(doc) {
     fuel: o.fuel,
     cargo: o.cargo,
     status: o.status,
+    envDrag: 0,
     envDragKnots: 0,
+    fuelConsumptionTick: 0,
     _prevStatus: o.status,
   };
 }
@@ -45,7 +57,9 @@ function ramToPayload(s) {
     speed: s.speed,
     baseSpeed: s.baseSpeed,
     effectiveSpeed: s.speed,
+    envDrag: s.envDrag,
     envDragKnots: s.envDragKnots,
+    fuelConsumptionTick: s.fuelConsumptionTick,
     heading: s.heading,
     destination: s.destination,
     fuel: s.fuel,
@@ -99,10 +113,11 @@ export class Simulator {
       2.5
     );
     this.globalWeather = {
-      wind: 0,
-      waves: 0,
+      wind: DEFAULT_WEATHER.wind,
+      waves: DEFAULT_WEATHER.waves,
       updatedAt: null,
-      source: 'open-meteo',
+      source: 'default',
+      lastSuccessfulSync: null,
     };
     /** @type {{ id: string; feature: import('geojson').Feature<import('geojson').Polygon> }[]} */
     this.restrictedZones = [];
@@ -123,6 +138,7 @@ export class Simulator {
       waves: this.globalWeather.waves,
       updatedAt: this.globalWeather.updatedAt,
       source: this.globalWeather.source,
+      lastSuccessfulSync: this.globalWeather.lastSuccessfulSync,
     };
   }
 
@@ -142,17 +158,33 @@ export class Simulator {
 
   async refreshWeather() {
     try {
-      const { data } = await axios.get(WEATHER_URL, { timeout: 8000 });
+      const { data } = await axios.get(buildWeatherUrl(), { timeout: 8000 });
       const wind = num(data?.current?.wind_speed_10m, 0);
       const waves = num(data?.current?.wave_height, 0);
+      const now = new Date().toISOString();
+      const weatherData = {
+        windSpeed: wind,
+        waveHeight: waves,
+        fetchedAt: now,
+        source: 'open-meteo',
+      };
+      console.log('Weather API Sync:', weatherData);
       this.globalWeather = {
         wind,
         waves,
-        updatedAt: new Date().toISOString(),
+        updatedAt: now,
         source: 'open-meteo',
+        lastSuccessfulSync: now,
       };
     } catch (error) {
       console.error('[Simulator] weather fetch failed:', error.message);
+      this.globalWeather = {
+        wind: DEFAULT_WEATHER.wind,
+        waves: DEFAULT_WEATHER.waves,
+        updatedAt: this.globalWeather.updatedAt,
+        source: 'fallback-default',
+        lastSuccessfulSync: this.globalWeather.lastSuccessfulSync,
+      };
     }
   }
 
@@ -226,13 +258,13 @@ export class Simulator {
     );
   }
 
-  applyFuelAndRangeStatus(ship) {
+  applyFuelAndRangeStatus(ship, tickDurationSec = 1) {
     const moving = ship.speed > 0 && Simulator.canMoveStatus(ship.status);
-    let fuelConsumptionPerSec =
-      (ship.baseSpeed * this.fuelBurnTonsPerKnotHour) / 3600;
-    if (this.globalWeather.wind > 25 || this.globalWeather.waves > 2) {
-      fuelConsumptionPerSec *= 1.3;
-    }
+    const baseBurn = (ship.speed / 10) * tickDurationSec;
+    const weatherPenalty =
+      this.globalWeather.wind > 25 || this.globalWeather.waves > 2 ? 1.3 : 1.0;
+    const fuelConsumptionPerSec = baseBurn * weatherPenalty;
+    ship.fuelConsumptionTick = moving ? fuelConsumptionPerSec : 0;
 
     if (moving) {
       ship.fuel = Math.max(0, ship.fuel - fuelConsumptionPerSec);
@@ -277,7 +309,7 @@ export class Simulator {
     const originalHeading = ship.heading;
     let moved = false;
 
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+    for (let attempt = 0; attempt < 36; attempt += 1) {
       const [nextLng, nextLat] = moveByHeading(
         startLng,
         startLat,
@@ -300,7 +332,7 @@ export class Simulator {
         moved = true;
         break;
       }
-      headingCandidate = normalizeHeading(headingCandidate + 45);
+      headingCandidate = normalizeHeading(headingCandidate + 10);
     }
 
     if (!moved) {
@@ -369,13 +401,19 @@ export class Simulator {
       const statusChanged = [];
 
       for (const ship of this.ships) {
+        const outsideNavigable = !this.isNavigable(ship.lng, ship.lat);
         const zone = this.zoneContaining(ship.lng, ship.lat);
-        if (zone) {
+        if (outsideNavigable || zone) {
           if (ship.status !== 'geofence_breach') {
-            this.io.emit('geofence', { shipId: ship.shipId, zoneId: zone.id });
+            this.io.emit('geofence', {
+              shipId: ship.shipId,
+              zoneId: zone?.id ?? null,
+              outsideNavigable,
+            });
             this.io.emit('alert:geofence', {
               shipId: ship.shipId,
-              zoneId: zone.id,
+              zoneId: zone?.id ?? null,
+              outsideNavigable,
             });
           }
           ship.status = 'geofence_breach';
@@ -387,15 +425,20 @@ export class Simulator {
           ship.status = 'normal';
         }
 
-        const waveMultiplier = Math.max(0, 1 - this.globalWeather.waves * 0.05);
-        const weatherAdjustedSpeed = Math.max(0, ship.baseSpeed * waveMultiplier);
-        ship.envDragKnots = Math.max(0, ship.baseSpeed - weatherAdjustedSpeed);
+        const weather = {
+          windSpeed: this.globalWeather.wind,
+          waveHeight: this.globalWeather.waves,
+        };
+        const drag = weather.windSpeed > 25 ? weather.windSpeed * 0.05 : 0;
+        const weatherAdjustedSpeed = Math.max(0, ship.baseSpeed - drag);
+        ship.envDrag = weather.windSpeed > 25 ? (weather.windSpeed - 25) * 0.1 : 0;
+        ship.envDragKnots = ship.envDrag;
         ship.speed = Simulator.canMoveStatus(ship.status)
           ? weatherAdjustedSpeed
           : 0;
 
         this.tryMoveShip(ship);
-        this.applyFuelAndRangeStatus(ship);
+        this.applyFuelAndRangeStatus(ship, 1);
       }
 
       const proximityWarnings = this.computeProximityWarnings();

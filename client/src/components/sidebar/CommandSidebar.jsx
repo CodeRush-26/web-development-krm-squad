@@ -20,6 +20,7 @@ export function CommandSidebar({
   onCaptainShipChange,
   distressMessage,
   onDistressChange,
+  onSendDistress,
   allShips = ships,
   isMobile,
   onCloseMobile,
@@ -63,6 +64,14 @@ export function CommandSidebar({
             value={distressMessage}
             onChange={(e) => onDistressChange(e.target.value)}
           />
+          <button
+            type="button"
+            className="tool-btn"
+            onClick={onSendDistress}
+            disabled={!captainShipId || !distressMessage.trim()}
+          >
+            Analyze Distress
+          </button>
         </div>
       ) : null}
 

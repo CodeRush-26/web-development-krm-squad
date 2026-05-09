@@ -35,7 +35,7 @@ export const ShipMarker = memo(function ShipMarker({
         <br />
         Fuel: {ship.fuel.toFixed(1)} t
         <br />
-        Env. Drag: -{(ship.envDragKnots ?? 0).toFixed(2)} kn
+        Env. Drag: -{(ship.envDrag ?? ship.envDragKnots ?? 0).toFixed(2)} kn
         <br />
         Destination: {ship.destination}
         <br />

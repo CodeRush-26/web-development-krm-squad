@@ -137,6 +137,7 @@ export default function App() {
     setSelectedShipId(shipId);
     setHoveredShipId(shipId);
     setFocusNonce((n) => n + 1);
+    if (isMobile) setSidebarOpen(false);
   }
 
   async function handleCreateZone(feature) {
@@ -149,6 +150,24 @@ export default function App() {
       toast.success('Restricted zone added');
     } catch (error) {
       toast.error('Failed to add zone');
+    }
+  }
+
+  async function handleSendDistress() {
+    if (!captainShipId || !distressMessage.trim()) return;
+    try {
+      const response = await fetch(`${API_URL}/api/distress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shipId: captainShipId, message: distressMessage }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.error || 'Distress analysis failed');
+      }
+      toast.success(`AI ${data.severity}: ${data.summary}`);
+    } catch (error) {
+      toast.error(error.message || 'Distress analysis failed');
     }
   }
 
@@ -192,7 +211,9 @@ export default function App() {
               onClick={() => setSidebarOpen((v) => !v)}
             >
               {sidebarOpen ? <X size={14} /> : <Menu size={14} />}
-              {sidebarOpen ? 'Close Panel' : 'Open Panel'}
+              <span className="tool-label">
+                {sidebarOpen ? 'Close Panel' : 'Open Panel'}
+              </span>
             </button>
           ) : null}
           <button
@@ -202,7 +223,7 @@ export default function App() {
             disabled={!mapRef.current}
           >
             <Compass size={14} />
-            Home
+            <span className="tool-label">Home</span>
           </button>
           <button
             type="button"
@@ -211,7 +232,7 @@ export default function App() {
             disabled={!mapRef.current || ships.length === 0}
           >
             <LocateFixed size={14} />
-            Fit Fleet
+            <span className="tool-label">Fit Fleet</span>
           </button>
           <button
             type="button"
@@ -220,14 +241,14 @@ export default function App() {
             disabled={!mapRef.current || !navigableWater}
           >
             <Orbit size={14} />
-            Fit Zone
+            <span className="tool-label">Fit Zone</span>
           </button>
           <button
             type="button"
             className={`tool-btn ${followSelected ? 'active' : ''}`}
             onClick={() => setFollowSelected((v) => !v)}
           >
-            Follow Selected
+            <span className="tool-label">Follow Selected</span>
           </button>
           <div className="role-toggle">
             <button
@@ -235,14 +256,14 @@ export default function App() {
               className={`tool-btn ${userRole === 'command' ? 'active' : ''}`}
               onClick={() => setUserRole('command')}
             >
-              COMMAND
+              <span className="tool-label">COMMAND</span>
             </button>
             <button
               type="button"
               className={`tool-btn ${userRole === 'captain' ? 'active' : ''}`}
               onClick={() => setUserRole('captain')}
             >
-              CAPTAIN
+              <span className="tool-label">CAPTAIN</span>
             </button>
           </div>
         </div>
@@ -329,6 +350,7 @@ export default function App() {
         onCaptainShipChange={setCaptainShipId}
         distressMessage={distressMessage}
         onDistressChange={setDistressMessage}
+        onSendDistress={handleSendDistress}
         isMobile={isMobile}
         onCloseMobile={() => setSidebarOpen(false)}
       />

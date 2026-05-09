@@ -13,7 +13,9 @@ import { createHealthRouter } from './routes/health.routes.js';
 import { createNavigableWaterRouter } from './routes/navigable-water.routes.js';
 import { createShipsRouter } from './routes/ships.routes.js';
 import { createZonesRouter } from './routes/zones.routes.js';
+import { createDistressRouter } from './routes/distress.routes.js';
 import { Simulator } from './services/Simulator.js';
+import { GeminiService } from './services/GeminiService.js';
 
 const PORT = Number(process.env.PORT) || 5050;
 const MONGO_URI = process.env.MONGO_URI;
@@ -75,6 +77,7 @@ async function main() {
 
   const ramShips = Simulator.fromDocuments(shipDocs);
   const simulator = new Simulator({ io, navigable, ships: ramShips, portsById });
+  const geminiService = new GeminiService();
 
   io.on('connection', (socket) => {
     socket.emit('zones-updated', simulator.getZonesPayload());
@@ -84,6 +87,7 @@ async function main() {
   app.use('/api/ships', createShipsRouter(simulator));
   app.use('/api/navigable-water', createNavigableWaterRouter(nwDoc));
   app.use('/api/zones', createZonesRouter(simulator));
+  app.use('/api/distress', createDistressRouter(geminiService));
 
   simulator.start();
 
