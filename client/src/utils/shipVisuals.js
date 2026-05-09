@@ -10,6 +10,17 @@ export function statusDotClass(status) {
   return 'dot amber';
 }
 
+export function isWeatherDelayed(ship) {
+  return ship?.status === 'normal' && ship?.baseSpeed > 0
+    ? ship.effectiveSpeed < ship.baseSpeed * 0.7
+    : false;
+}
+
+export function displayStatus(ship) {
+  if (isWeatherDelayed(ship)) return 'weather delayed';
+  return ship?.status ?? 'unknown';
+}
+
 export function fuelPercent(ship) {
   const maxFuelForBar = 9000;
   return Math.max(0, Math.min(100, (ship.fuel / maxFuelForBar) * 100));

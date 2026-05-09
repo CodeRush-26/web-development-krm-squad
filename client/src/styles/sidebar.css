@@ -82,6 +82,10 @@
   text-transform: capitalize;
 }
 
+.status-chip.weather-delayed {
+  color: #fbbf24;
+}
+
 .status-chip.critical {
   color: #ff6b8b;
   text-shadow: 0 0 12px rgba(244, 63, 94, 0.95);

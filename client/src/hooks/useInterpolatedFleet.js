@@ -5,6 +5,7 @@ import { SOCKET_URL, TICK_MS } from '../constants/fleet';
 export function useInterpolatedFleet() {
   const [socketStatus, setSocketStatus] = useState('connecting');
   const [ships, setShips] = useState([]);
+  const [weather, setWeather] = useState({ wind: 0, waves: 0 });
   const framesRef = useRef({});
   const rafRef = useRef(null);
 
@@ -30,7 +31,9 @@ export function useInterpolatedFleet() {
     const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
     socket.on('connect', () => setSocketStatus('connected'));
     socket.on('disconnect', () => setSocketStatus('disconnected'));
-    socket.on('fleet-update', (fleet) => {
+    socket.on('fleet-update', (payload) => {
+      const fleet = Array.isArray(payload) ? payload : payload?.ships;
+      const weatherPayload = Array.isArray(payload) ? null : payload?.weather;
       if (!Array.isArray(fleet)) return;
       const now = performance.now();
 
@@ -56,6 +59,13 @@ export function useInterpolatedFleet() {
           startedAt: now,
         };
       }
+
+      if (weatherPayload) {
+        setWeather({
+          wind: Number(weatherPayload.wind) || 0,
+          waves: Number(weatherPayload.waves) || 0,
+        });
+      }
     });
 
     rafRef.current = requestAnimationFrame(renderFrame);
@@ -66,5 +76,5 @@ export function useInterpolatedFleet() {
     };
   }, []);
 
-  return { ships, socketStatus };
+  return { ships, socketStatus, weather };
 }

@@ -1,7 +1,9 @@
 ﻿import { Gauge, Navigation, Radar, Ship as ShipIcon, Waves } from 'lucide-react';
 import {
+  displayStatus,
   fuelPercent,
   isCriticalStatus,
+  isWeatherDelayed,
   statusDotClass,
 } from '../../utils/shipVisuals';
 
@@ -38,10 +40,10 @@ export function CommandSidebar({
               <div className="ship-top">
                 <span className="ship-name">{ship.name}</span>
                 <span
-                  className={`status-chip ${isCriticalStatus(ship.status) ? 'critical' : ''}`}
+                  className={`status-chip ${isCriticalStatus(ship.status) ? 'critical' : ''} ${isWeatherDelayed(ship) ? 'weather-delayed' : ''}`}
                 >
-                  <span className={statusDotClass(ship.status)} />
-                  {ship.status}
+                  <span className={statusDotClass(isWeatherDelayed(ship) ? 'rerouting' : ship.status)} />
+                  {displayStatus(ship)}
                 </span>
               </div>
 

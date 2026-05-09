@@ -13,13 +13,14 @@ export function TopLeftHud({ socketStatus, shipsCount }) {
   );
 }
 
-export function TopCenterHud({ utcClock }) {
+export function TopCenterHud({ utcClock, windSpeed }) {
+  const highWinds = Number(windSpeed ?? 0) > 30;
   return (
     <div className="hud-panel hud-top-center rounded-xl">
       <div className="clock-line">UTC {utcClock}</div>
-      <div className="status-line">
+      <div className={`status-line ${highWinds ? 'status-caution' : ''}`}>
         <span className="status-led" />
-        System Status: Online
+        {highWinds ? 'CAUTION: HIGH WINDS' : 'System Status: Online'}
       </div>
     </div>
   );
@@ -33,10 +34,11 @@ export function BottomLeftHud({ cursorCoords }) {
   );
 }
 
-export function BottomCenterHud() {
+export function BottomCenterHud({ weather }) {
   return (
     <div className="hud-panel hud-bottom-center rounded-xl hud-mono">
-      <Wind size={14} /> Wind: -- kts | Waves: -- m
+      <Wind size={14} /> Wind: {(weather?.wind ?? 0).toFixed(1)} kts | Waves:{' '}
+      {(weather?.waves ?? 0).toFixed(2)} m
     </div>
   );
 }
