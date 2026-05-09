@@ -10,7 +10,7 @@ import {
 export function CommandSidebar({
   ships,
   selectedShipId,
-  setSelectedShipId,
+  onSelectShip,
   setHoveredShipId,
   telemetryPulse,
   socketStatus,
@@ -33,9 +33,12 @@ export function CommandSidebar({
             <button
               type="button"
               className={`ship-btn rounded-xl ${selectedShipId === ship.shipId ? 'active' : ''}`}
-              onClick={() => setSelectedShipId(ship.shipId)}
+              onClick={() => onSelectShip(ship.shipId)}
               onMouseEnter={() => setHoveredShipId(ship.shipId)}
-              onMouseLeave={() => setHoveredShipId('')}
+              onMouseLeave={() => {
+                if (selectedShipId === ship.shipId) return;
+                setHoveredShipId('');
+              }}
             >
               <div className="ship-top">
                 <span className="ship-name">{ship.name}</span>

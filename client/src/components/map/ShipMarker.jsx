@@ -6,6 +6,7 @@ export const ShipMarker = memo(function ShipMarker({
   ship,
   markerRefs,
   highlighted,
+  onSelectShip,
 }) {
   const icon = useMemo(
     () => createShipIcon(ship.heading, ship.status, highlighted),
@@ -19,6 +20,11 @@ export const ShipMarker = memo(function ShipMarker({
       }}
       position={ship.position}
       icon={icon}
+      eventHandlers={{
+        click: () => {
+          onSelectShip(ship.shipId);
+        },
+      }}
     >
       <Popup>
         <strong>{ship.name}</strong>

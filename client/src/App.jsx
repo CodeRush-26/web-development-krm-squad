@@ -27,6 +27,7 @@ export default function App() {
   const [cursorCoords, setCursorCoords] = useState(MAP_CENTER);
   const [utcClock, setUtcClock] = useState(utcClockString());
   const [followSelected, setFollowSelected] = useState(false);
+  const [focusNonce, setFocusNonce] = useState(0);
 
   const markerRefs = useRef({});
   const mapRef = useRef(null);
@@ -95,6 +96,12 @@ export default function App() {
       duration: 1.1,
       padding: [30, 30],
     });
+  }
+
+  function handleSelectShip(shipId) {
+    setSelectedShipId(shipId);
+    setHoveredShipId(shipId);
+    setFocusNonce((n) => n + 1);
   }
 
   return (
@@ -173,6 +180,7 @@ export default function App() {
               ship={ship}
               markerRefs={markerRefs}
               highlighted={hoveredShipId === ship.shipId}
+              onSelectShip={handleSelectShip}
             />
           ))}
 
@@ -180,6 +188,7 @@ export default function App() {
             selectedShip={selectedShip}
             markerRefs={markerRefs}
             followSelected={followSelected}
+            focusNonce={focusNonce}
           />
           <MapActionsController
             onReady={(map) => {
@@ -193,7 +202,7 @@ export default function App() {
       <CommandSidebar
         ships={ships}
         selectedShipId={selectedShipId}
-        setSelectedShipId={setSelectedShipId}
+        onSelectShip={handleSelectShip}
         setHoveredShipId={setHoveredShipId}
         telemetryPulse={telemetryPulse}
         socketStatus={socketStatus}
