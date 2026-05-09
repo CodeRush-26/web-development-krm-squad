@@ -2,8 +2,6 @@ import * as turf from '@turf/turf';
 import Ship from '../models/Ship.js';
 
 const TICK_MS = 1000;
-const SNAPSHOT_MS = 30_000;
-
 function num(v, fallback) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -76,7 +74,6 @@ export class Simulator {
     /** @type {ReturnType<typeof setInterval> | null} */
     this.intervalId = null;
     this.running = false;
-    this._lastSnapshotAt = Date.now();
     this.fuelBurnTonsPerKnotHour = num(
       process.env.FUEL_BURN_TONS_PER_KNOT_HOUR,
       2.5
@@ -154,14 +151,9 @@ export class Simulator {
     );
   }
 
-  async snapshotFleetToDb() {
-    await this.persistShipSubset(this.ships);
-  }
-
   async tick() {
     try {
       const statusChanged = [];
-      const now = Date.now();
 
       for (const ship of this.ships) {
         this.applyFuelDrain(ship);
@@ -183,7 +175,8 @@ export class Simulator {
             ship.lng = nLng;
             ship.lat = nLat;
           } else {
-            ship.status = 'stopped';
+            ship.status = 'blocked';
+            ship.speed = 0;
           }
         }
 
@@ -197,11 +190,6 @@ export class Simulator {
 
       if (statusChanged.length > 0) {
         await this.persistShipSubset(statusChanged);
-      }
-
-      if (now - this._lastSnapshotAt >= SNAPSHOT_MS) {
-        await this.snapshotFleetToDb();
-        this._lastSnapshotAt = now;
       }
     } catch (err) {
       console.error('[Simulator] tick failed:', err);

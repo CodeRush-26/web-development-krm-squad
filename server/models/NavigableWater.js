@@ -7,9 +7,6 @@ const NavigableWaterSchema = new mongoose.Schema(
       type: String,
       default: 'fleet.json vertices are [lat, lng]; stored as GeoJSON Polygon [lng, lat]',
     },
-      type: String,
-      default: 'fleet.json vertices are [lat, lng]; stored as GeoJSON Polygon [lng, lat]',
-    },
     polygon: {
       type: {
         type: String,
