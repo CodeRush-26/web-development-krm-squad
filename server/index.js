@@ -7,10 +7,12 @@ import mongoose from 'mongoose';
 import * as turf from '@turf/turf';
 import Ship from './models/Ship.js';
 import NavigableWater from './models/NavigableWater.js';
+import Port from './models/Port.js';
 import { resolveCorsOrigins } from './config/cors.config.js';
 import { createHealthRouter } from './routes/health.routes.js';
 import { createNavigableWaterRouter } from './routes/navigable-water.routes.js';
 import { createShipsRouter } from './routes/ships.routes.js';
+import { createZonesRouter } from './routes/zones.routes.js';
 import { Simulator } from './services/Simulator.js';
 
 const PORT = Number(process.env.PORT) || 5050;
@@ -36,7 +38,7 @@ const io = new Server(server, {
 
 io.on('connection', (socket) => {
   socket.emit('connected', { message: 'fleet channel ready' });
-});
+}); 
 
 async function main() {
   if (!MONGO_URI) {
@@ -62,12 +64,26 @@ async function main() {
     );
   }
 
+  const portDocs = await Port.find({}).lean();
+  const portsById = {};
+  for (const port of portDocs) {
+    portsById[port.portId] = {
+      lng: port.location.coordinates[0],
+      lat: port.location.coordinates[1],
+    };
+  }
+
   const ramShips = Simulator.fromDocuments(shipDocs);
-  const simulator = new Simulator({ io, navigable, ships: ramShips });
+  const simulator = new Simulator({ io, navigable, ships: ramShips, portsById });
+
+  io.on('connection', (socket) => {
+    socket.emit('zones-updated', simulator.getZonesPayload());
+  });
 
   app.use(createHealthRouter());
   app.use('/api/ships', createShipsRouter(simulator));
   app.use('/api/navigable-water', createNavigableWaterRouter(nwDoc));
+  app.use('/api/zones', createZonesRouter(simulator));
 
   simulator.start();
 

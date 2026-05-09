@@ -1,7 +1,12 @@
 ﻿import L from 'leaflet';
 
 export function isCriticalStatus(status) {
-  return status === 'blocked' || status === 'out_of_fuel';
+  return (
+    status === 'blocked' ||
+    status === 'out_of_fuel' ||
+    status === 'geofence_breach' ||
+    status === 'stranded'
+  );
 }
 
 export function statusDotClass(status) {

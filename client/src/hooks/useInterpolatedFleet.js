@@ -6,6 +6,8 @@ export function useInterpolatedFleet() {
   const [socketStatus, setSocketStatus] = useState('connecting');
   const [ships, setShips] = useState([]);
   const [weather, setWeather] = useState({ wind: 0, waves: 0 });
+  const [zones, setZones] = useState([]);
+  const [alerts, setAlerts] = useState([]);
   const framesRef = useRef({});
   const rafRef = useRef(null);
 
@@ -34,6 +36,7 @@ export function useInterpolatedFleet() {
     socket.on('fleet-update', (payload) => {
       const fleet = Array.isArray(payload) ? payload : payload?.ships;
       const weatherPayload = Array.isArray(payload) ? null : payload?.weather;
+      const zonesPayload = Array.isArray(payload) ? null : payload?.zones;
       if (!Array.isArray(fleet)) return;
       const now = performance.now();
 
@@ -66,6 +69,36 @@ export function useInterpolatedFleet() {
           waves: Number(weatherPayload.waves) || 0,
         });
       }
+      if (Array.isArray(zonesPayload)) {
+        setZones(zonesPayload);
+      }
+    });
+    socket.on('zones-updated', (incomingZones) => {
+      if (Array.isArray(incomingZones)) setZones(incomingZones);
+    });
+    socket.on('proximity', (payload) => {
+      setAlerts((prev) => [
+        ...prev.slice(-20),
+        { type: 'proximity', payload, at: Date.now() },
+      ]);
+    });
+    socket.on('alert:proximity', (payload) => {
+      setAlerts((prev) => [
+        ...prev.slice(-20),
+        { type: 'proximity', payload, at: Date.now() },
+      ]);
+    });
+    socket.on('geofence', (payload) => {
+      setAlerts((prev) => [
+        ...prev.slice(-20),
+        { type: 'geofence', payload, at: Date.now() },
+      ]);
+    });
+    socket.on('alert:geofence', (payload) => {
+      setAlerts((prev) => [
+        ...prev.slice(-20),
+        { type: 'geofence', payload, at: Date.now() },
+      ]);
     });
 
     rafRef.current = requestAnimationFrame(renderFrame);
@@ -76,5 +109,5 @@ export function useInterpolatedFleet() {
     };
   }, []);
 
-  return { ships, socketStatus, weather };
+  return { ships, socketStatus, weather, zones, alerts };
 }

@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { GeoJSON, MapContainer, TileLayer } from 'react-leaflet';
 import { Compass, LocateFixed, Orbit } from 'lucide-react';
+import { Toaster, toast } from 'react-hot-toast';
 import { API_URL, MAP_CENTER, MAP_ZOOM } from './constants/fleet';
 import { useInterpolatedFleet } from './hooks/useInterpolatedFleet';
 import { useTelemetryPulse } from './hooks/useTelemetryPulse';
@@ -9,6 +10,7 @@ import { ShipMarker } from './components/map/ShipMarker';
 import { MapFocusController } from './components/map/MapFocusController';
 import { CursorHudController } from './components/map/CursorHudController';
 import { MapActionsController } from './components/map/MapActionsController';
+import { DrawZonesController } from './components/map/DrawZonesController';
 import {
   BottomCenterHud,
   BottomLeftHud,
@@ -18,9 +20,12 @@ import {
 import { CommandSidebar } from './components/sidebar/CommandSidebar';
 
 export default function App() {
-  const { ships, socketStatus, weather } = useInterpolatedFleet();
+  const { ships, socketStatus, weather, zones, alerts } = useInterpolatedFleet();
   const telemetryPulse = useTelemetryPulse(ships);
 
+  const [userRole, setUserRole] = useState('command');
+  const [captainShipId, setCaptainShipId] = useState('');
+  const [distressMessage, setDistressMessage] = useState('');
   const [selectedShipId, setSelectedShipId] = useState('');
   const [hoveredShipId, setHoveredShipId] = useState('');
   const [navigableWater, setNavigableWater] = useState(null);
@@ -31,6 +36,8 @@ export default function App() {
 
   const markerRefs = useRef({});
   const mapRef = useRef(null);
+  const lastAlertAtRef = useRef(0);
+  const beepRef = useRef(null);
 
   useEffect(() => {
     const timer = setInterval(() => setUtcClock(utcClockString()), 1000);
@@ -58,6 +65,20 @@ export default function App() {
     () => ships.find((s) => s.shipId === selectedShipId) || null,
     [selectedShipId, ships]
   );
+  const visibleShips = useMemo(() => {
+    if (userRole === 'captain') {
+      if (!captainShipId) return [];
+      return ships.filter((s) => s.shipId === captainShipId);
+    }
+    return ships;
+  }, [captainShipId, ships, userRole]);
+
+  useEffect(() => {
+    if (userRole === 'captain' && captainShipId) {
+      handleSelectShip(captainShipId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [captainShipId, userRole]);
 
   const maxBounds = useMemo(() => {
     const box = navigableWater?.properties?.boundingBox;
@@ -104,8 +125,46 @@ export default function App() {
     setFocusNonce((n) => n + 1);
   }
 
+  async function handleCreateZone(feature) {
+    try {
+      await fetch(`${API_URL}/api/zones`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(feature),
+      });
+      toast.success('Restricted zone added');
+    } catch (error) {
+      toast.error('Failed to add zone');
+    }
+  }
+
+  useEffect(() => {
+    if (!alerts.length) return;
+    const latest = alerts[alerts.length - 1];
+    if (!latest || latest.at <= lastAlertAtRef.current) return;
+    lastAlertAtRef.current = latest.at;
+
+    if (latest.type === 'proximity') {
+      toast.error(
+        `Proximity alert: ${latest.payload.ships?.[0]} & ${latest.payload.ships?.[1]}`
+      );
+    } else if (latest.type === 'geofence') {
+      toast.error(`Geofence breach: ${latest.payload.shipId}`);
+    }
+    if (beepRef.current) {
+      beepRef.current.currentTime = 0;
+      beepRef.current.play().catch(() => {});
+    }
+  }, [alerts]);
+
   return (
     <div className="layout">
+      <Toaster position="top-center" />
+      <audio
+        ref={beepRef}
+        preload="auto"
+        src="data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YRAAAAAA////AAAA////AAAA"
+      />
       <div className="map-wrap">
         <TopLeftHud socketStatus={socketStatus} shipsCount={ships.length} />
         <TopCenterHud utcClock={utcClock} windSpeed={weather.wind} />
@@ -146,6 +205,22 @@ export default function App() {
           >
             Follow Selected
           </button>
+          <div className="role-toggle">
+            <button
+              type="button"
+              className={`tool-btn ${userRole === 'command' ? 'active' : ''}`}
+              onClick={() => setUserRole('command')}
+            >
+              COMMAND
+            </button>
+            <button
+              type="button"
+              className={`tool-btn ${userRole === 'captain' ? 'active' : ''}`}
+              onClick={() => setUserRole('captain')}
+            >
+              CAPTAIN
+            </button>
+          </div>
         </div>
 
         <MapContainer
@@ -174,7 +249,7 @@ export default function App() {
             />
           ) : null}
 
-          {ships.map((ship) => (
+          {visibleShips.map((ship) => (
             <ShipMarker
               key={ship.shipId}
               ship={ship}
@@ -184,6 +259,11 @@ export default function App() {
             />
           ))}
 
+          <DrawZonesController
+            userRole={userRole}
+            zones={zones}
+            onCreateZone={handleCreateZone}
+          />
           <MapFocusController
             selectedShip={selectedShip}
             markerRefs={markerRefs}
@@ -200,12 +280,18 @@ export default function App() {
       </div>
 
       <CommandSidebar
-        ships={ships}
+        ships={visibleShips}
+        allShips={ships}
         selectedShipId={selectedShipId}
         onSelectShip={handleSelectShip}
         setHoveredShipId={setHoveredShipId}
         telemetryPulse={telemetryPulse}
         socketStatus={socketStatus}
+        userRole={userRole}
+        captainShipId={captainShipId}
+        onCaptainShipChange={setCaptainShipId}
+        distressMessage={distressMessage}
+        onDistressChange={setDistressMessage}
       />
     </div>
   );

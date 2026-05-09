@@ -1,4 +1,5 @@
 ﻿import { Gauge, Navigation, Radar, Ship as ShipIcon, Waves } from 'lucide-react';
+import { motion } from 'framer-motion';
 import {
   displayStatus,
   fuelPercent,
@@ -14,6 +15,12 @@ export function CommandSidebar({
   setHoveredShipId,
   telemetryPulse,
   socketStatus,
+  userRole,
+  captainShipId,
+  onCaptainShipChange,
+  distressMessage,
+  onDistressChange,
+  allShips = ships,
 }) {
   return (
     <aside className="sidebar rounded-xl">
@@ -26,10 +33,40 @@ export function CommandSidebar({
           <ShipIcon size={16} /> {ships.length}
         </span>
       </div>
+      {userRole === 'captain' ? (
+        <div className="captain-controls">
+          <label htmlFor="captainShipSelect">Select Your Ship</label>
+          <select
+            id="captainShipSelect"
+            value={captainShipId}
+            onChange={(e) => onCaptainShipChange(e.target.value)}
+          >
+            <option value="">-- choose ship --</option>
+            {allShips.map((s) => (
+              <option key={s.shipId} value={s.shipId}>
+                {s.name} ({s.shipId})
+              </option>
+            ))}
+          </select>
+          <label htmlFor="distressSignal">Distress Signal</label>
+          <textarea
+            id="distressSignal"
+            rows={2}
+            placeholder="Type distress message..."
+            value={distressMessage}
+            onChange={(e) => onDistressChange(e.target.value)}
+          />
+        </div>
+      ) : null}
 
       <ul className="ship-list">
         {ships.map((ship) => (
-          <li key={ship.shipId}>
+          <motion.li
+            key={ship.shipId}
+            initial={{ opacity: 0.7 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.2 }}
+          >
             <button
               type="button"
               className={`ship-btn rounded-xl ${selectedShipId === ship.shipId ? 'active' : ''}`}
@@ -78,7 +115,7 @@ export function CommandSidebar({
                 </span>
               </div>
             </button>
-          </li>
+          </motion.li>
         ))}
       </ul>
 
