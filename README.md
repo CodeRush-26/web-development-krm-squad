@@ -74,10 +74,13 @@ Services:
 | **server** | `5050` | `MONGO_URI` points at the `mongodb` service |
 | **client** | `5173` | Static build (Nginx); WebSocket/API URL defaulted to `http://localhost:5050` |
 
-First-time seed (run once after Mongo is up):
+On **`docker compose up`**, a one-shot **`seed`** service runs before **`server`**. If the database is empty it loads ships, ports, and navigable water from `server/data/fleet.json`; if already seeded, it exits immediately so existing data is kept.
+
+To **reset the database** and seed again from scratch, remove the Mongo volume and bring the stack back up:
 
 ```bash
-docker compose run --rm server node seed.js
+docker compose down -v
+docker compose up --build
 ```
 
 Rebuild the SPA with a different API/socket origin (URL must work **in the user’s browser**):

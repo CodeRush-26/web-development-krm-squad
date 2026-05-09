@@ -1,3 +1,6 @@
+# Root stack: MongoDB + API/simulator + static SPA (nginx).
+# First boot runs `seed` once when the DB is empty (see server/seed.js).
+
 services:
   mongodb:
     image: mongo:7
@@ -14,6 +17,18 @@ services:
       retries: 10
       start_period: 20s
 
+  seed:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: "no"
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/coderush_fleet
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    command: ["node", "seed.js"]
+
   server:
     build:
       context: ./server
@@ -28,6 +43,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
 
   client:
     build:
@@ -39,7 +56,8 @@ services:
     ports:
       - "5173:80"
     depends_on:
-      - server
+      server:
+        condition: service_healthy
 
 volumes:
   mongodb_data:

@@ -35,6 +35,13 @@ async function seed() {
 
   await mongoose.connect(uri);
 
+  const alreadySeeded = await NavigableWater.findOne().lean();
+  if (alreadySeeded?.polygon?.coordinates?.length) {
+    console.log('[Seed] Database already initialized — skipping.');
+    await mongoose.disconnect();
+    return;
+  }
+
   const data = await loadFleetData();
 
   await Ship.deleteMany({});
