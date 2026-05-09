@@ -4,66 +4,157 @@
 }
 
 .ship-marker {
-  width: 32px;
-  height: 32px;
+  width: 52px;
+  height: 52px;
   position: relative;
   display: grid;
   place-items: center;
   transition: color 300ms ease, transform 250ms ease;
 }
 
+.ship-visibility-ring {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    inset 0 0 10px rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+}
+
 .ship-pulse {
   position: absolute;
-  width: 30px;
-  height: 30px;
+  width: 46px;
+  height: 46px;
   border-radius: 999px;
   border: 1px solid currentcolor;
-  opacity: 0.46;
-  animation: sonar 2.1s ease-out infinite;
+  opacity: 0;
+  animation: none;
 }
 
 .ship-rotation {
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   transition: transform 240ms linear;
 }
 
 .ship-svg {
-  width: 24px;
-  height: 24px;
-  fill: currentcolor;
-  filter: drop-shadow(0 0 8px currentcolor);
+  width: 40px;
+  height: 40px;
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.95))
+    drop-shadow(0 0 6px rgba(255, 255, 255, 0.35))
+    drop-shadow(0 0 14px currentcolor);
+}
+
+.ship-svg .ship-hull-outline {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.92);
+  stroke-width: 8;
+  stroke-linejoin: round;
+}
+
+.ship-svg .ship-hull {
+  stroke-width: 5;
+  stroke-linejoin: round;
+}
+
+.ship-svg .ship-bridge {
+  stroke-width: 2.2;
 }
 
 .ship-svg .ship-deck {
   fill: none;
-  stroke: rgba(255, 255, 255, 0.65);
-  stroke-width: 4;
+  stroke-width: 2.4;
   stroke-linecap: round;
+  opacity: 0.75;
+}
+
+.ship-svg .ship-nav-light {
+  fill: rgba(255, 255, 255, 0.75);
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.45));
 }
 
 .ship-marker.normal {
-  color: #22d3ee;
+  color: #67e8f9;
+}
+
+.ship-marker.type-cargo.normal {
+  color: #67e8f9;
+}
+
+.ship-marker.type-tanker.normal {
+  color: #93c5fd;
+}
+
+.ship-marker.type-passenger.normal {
+  color: #5eead4;
+}
+
+.ship-marker.type-security.normal {
+  color: #c4b5fd;
 }
 
 .ship-marker.alert {
-  color: #f43f5e;
+  color: #fb7185;
 }
 
 .ship-marker.warning {
-  color: #f59e0b;
+  color: #fb923c;
+}
+
+.ship-marker.warning .ship-pulse {
+  opacity: 0.5;
+  animation: sonar 2.2s ease-out infinite;
 }
 
 .ship-marker.highlighted {
-  transform: scale(1.2);
-  filter: brightness(1.35);
+  transform: scale(1.16);
+  filter: brightness(1.28);
+}
+
+/* NLP “closest ship to …”: reference vessel vs. answer vessel */
+.ship-marker.command-anchor .ship-visibility-ring {
+  border-color: rgba(251, 191, 36, 0.95);
+  box-shadow:
+    0 0 0 2px rgba(251, 191, 36, 0.35),
+    0 0 14px rgba(251, 191, 36, 0.45),
+    inset 0 0 12px rgba(251, 191, 36, 0.12);
+}
+
+.ship-marker.command-anchor .ship-svg {
+  filter:
+    drop-shadow(0 0 2px rgba(251, 191, 36, 0.9))
+    drop-shadow(0 0 10px rgba(251, 191, 36, 0.45));
+}
+
+.ship-marker.command-target.highlighted {
+  transform: scale(1.22);
+  filter: brightness(1.38) drop-shadow(0 0 14px rgba(52, 211, 153, 0.85));
+}
+
+.ship-marker.command-target .ship-visibility-ring {
+  border-color: rgba(52, 211, 153, 0.85);
+  box-shadow:
+    0 0 0 2px rgba(16, 185, 129, 0.35),
+    0 0 16px rgba(52, 211, 153, 0.5);
+}
+
+.ship-marker.dimmed {
+  opacity: 0.2;
+  filter: saturate(0.5);
 }
 
 .ship-marker.distress-pulse .ship-pulse {
   animation: distressPulse 0.6s ease-out infinite;
   border-width: 2px;
+  opacity: 0.9;
 }
 
 @keyframes sonar {

@@ -5,6 +5,7 @@ import { SOCKET_URL, TICK_MS } from '../constants/fleet';
 export function useInterpolatedFleet() {
   const [socketStatus, setSocketStatus] = useState('connecting');
   const [ships, setShips] = useState([]);
+  const [threats, setThreats] = useState([]);
   const [weather, setWeather] = useState({
     wind: 0,
     waves: 0,
@@ -43,6 +44,7 @@ export function useInterpolatedFleet() {
       const fleet = Array.isArray(payload) ? payload : payload?.ships;
       const weatherPayload = Array.isArray(payload) ? null : payload?.weather;
       const zonesPayload = Array.isArray(payload) ? null : payload?.zones;
+      const threatsPayload = Array.isArray(payload) ? null : payload?.threats;
       if (!Array.isArray(fleet)) return;
       const now = performance.now();
 
@@ -81,6 +83,9 @@ export function useInterpolatedFleet() {
       if (Array.isArray(zonesPayload)) {
         setZones(zonesPayload);
       }
+      if (Array.isArray(threatsPayload)) {
+        setThreats(threatsPayload);
+      }
     });
     socket.on('zones-updated', (incomingZones) => {
       if (Array.isArray(incomingZones)) setZones(incomingZones);
@@ -115,6 +120,18 @@ export function useInterpolatedFleet() {
         { type: 'distress', payload, at: Date.now() },
       ]);
     });
+    socket.on('fleet-advisor-alert', (payload) => {
+      setAlerts((prev) => [
+        ...prev.slice(-20),
+        { type: 'fleet_advisor', payload, at: Date.now() },
+      ]);
+    });
+    socket.on('security-alert', (payload) => {
+      setAlerts((prev) => [
+        ...prev.slice(-20),
+        { type: 'security', payload, at: Date.now() },
+      ]);
+    });
 
     rafRef.current = requestAnimationFrame(renderFrame);
     return () => {
@@ -124,5 +141,5 @@ export function useInterpolatedFleet() {
     };
   }, []);
 
-  return { ships, socketStatus, weather, zones, alerts };
+  return { ships, threats, socketStatus, weather, zones, alerts };
 }

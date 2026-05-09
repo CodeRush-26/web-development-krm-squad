@@ -1,12 +1,15 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { GeoJSON, MapContainer, TileLayer } from 'react-leaflet';
-import { Compass, LocateFixed, Menu, Orbit, X } from 'lucide-react';
+import { Circle, GeoJSON, MapContainer, Polyline, TileLayer } from 'react-leaflet';
+import { Compass, FilterX, LocateFixed, Menu, Orbit, X } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
-import { API_URL, MAP_CENTER, MAP_ZOOM } from './constants/fleet';
+import { API_URL, MAP_CENTER, MAP_ZOOM, PORTS } from './constants/fleet';
 import { useInterpolatedFleet } from './hooks/useInterpolatedFleet';
 import { useTelemetryPulse } from './hooks/useTelemetryPulse';
 import { utcClockString } from './utils/time';
+import { inferShipType, isCriticalStatus } from './utils/shipVisuals';
 import { ShipMarker } from './components/map/ShipMarker';
+import { DarkThreatMarker } from './components/map/DarkThreatMarker';
+import { CommandSearch } from './components/CommandSearch';
 import { MapFocusController } from './components/map/MapFocusController';
 import { CursorHudController } from './components/map/CursorHudController';
 import { MapActionsController } from './components/map/MapActionsController';
@@ -16,18 +19,48 @@ import {
   BottomCenterHud,
   BottomLeftHud,
   TopCenterHud,
+  TopRightUtcHud,
   TopLeftHud,
 } from './components/hud/HudPanels';
 import { CommandSidebar } from './components/sidebar/CommandSidebar';
 
+function kmBetween(a, b) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const [lat1, lng1] = a;
+  const [lat2, lng2] = b;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const s1 = Math.sin(dLat / 2) ** 2;
+  const s2 =
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(s1 + s2), Math.sqrt(1 - (s1 + s2)));
+}
+
+function stripCommandNameTail(s) {
+  return String(s || '')
+    .trim()
+    .replace(/^["']+|["']+$/g, '')
+    .replace(/[.?!"')]+$/g, '')
+    .trim();
+}
+
+function findShipByLooseName(rawName, shipList) {
+  const n = stripCommandNameTail(rawName).toLowerCase();
+  if (!n) return null;
+  const exact = shipList.find((ship) => ship.name.toLowerCase() === n);
+  if (exact) return exact;
+  return shipList.find((ship) => ship.name.toLowerCase().includes(n)) || null;
+}
+
 export default function App() {
-  const { ships, socketStatus, weather, zones, alerts } = useInterpolatedFleet();
+  const { ships, threats, socketStatus, weather, zones, alerts } = useInterpolatedFleet();
   const telemetryPulse = useTelemetryPulse(ships);
 
   const [userRole, setUserRole] = useState('command');
   const [captainShipId, setCaptainShipId] = useState('');
   const [distressMessage, setDistressMessage] = useState('');
   const [selectedShipId, setSelectedShipId] = useState('');
+  const [selectedDarkThreatId, setSelectedDarkThreatId] = useState('');
   const [hoveredShipId, setHoveredShipId] = useState('');
   const [navigableWater, setNavigableWater] = useState(null);
   const [cursorCoords, setCursorCoords] = useState(MAP_CENTER);
@@ -37,6 +70,12 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [distressPulseByShip, setDistressPulseByShip] = useState({});
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [mapTheme, setMapTheme] = useState('dark');
+  const [commandFilterShipIds, setCommandFilterShipIds] = useState(null);
+  const [commandProximity, setCommandProximity] = useState(null);
+  const [latestRecommendation, setLatestRecommendation] = useState(null);
+  const [diversionRoutes, setDiversionRoutes] = useState({});
 
   const markerRefs = useRef({});
   const mapRef = useRef(null);
@@ -86,8 +125,29 @@ export default function App() {
       if (!captainShipId) return [];
       return ships.filter((s) => s.shipId === captainShipId);
     }
-    return ships;
-  }, [captainShipId, ships, userRole]);
+    if (typeFilter === 'all') return ships;
+    return ships.filter((s) => inferShipType(s) === typeFilter);
+  }, [captainShipId, ships, userRole, typeFilter]);
+
+  const commandFilterSet = useMemo(
+    () => (commandFilterShipIds ? new Set(commandFilterShipIds) : null),
+    [commandFilterShipIds]
+  );
+
+  const commandMapFocusActive = Boolean(commandProximity || commandFilterShipIds);
+
+  function clearCommandMapFocus() {
+    setCommandProximity(null);
+    setCommandFilterShipIds(null);
+  }
+
+  const commandProximityLinePositions = useMemo(() => {
+    if (!commandProximity) return null;
+    const a = ships.find((s) => s.shipId === commandProximity.anchorShipId);
+    const n = ships.find((s) => s.shipId === commandProximity.nearestShipId);
+    if (!a || !n) return null;
+    return [a.position, n.position];
+  }, [commandProximity, ships]);
 
   useEffect(() => {
     if (userRole === 'captain' && captainShipId) {
@@ -104,6 +164,43 @@ export default function App() {
       [box.north, box.east],
     ];
   }, [navigableWater]);
+
+  const tileConfig = useMemo(() => {
+    if (mapTheme === 'dark') {
+      return {
+        url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
+        labelUrl:
+          'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; CartoDB',
+      };
+    }
+    return {
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+      labelUrl: null,
+      attribution:
+        'Tiles &copy; Esri',
+    };
+  }, [mapTheme]);
+
+  const navigableStyle = useMemo(() => {
+    if (mapTheme === 'dark') {
+      return {
+        color: '#67e8f9',
+        weight: 1.8,
+        fillColor: '#38bdf8',
+        fillOpacity: 0.17,
+        dashArray: '4 6',
+      };
+    }
+    return {
+      color: '#0284c7',
+      weight: 1.6,
+      fillColor: '#0ea5e9',
+      fillOpacity: 0.1,
+      dashArray: '2 6',
+    };
+  }, [mapTheme]);
 
   function goHomeView() {
     const map = mapRef.current;
@@ -137,8 +234,27 @@ export default function App() {
 
   function handleSelectShip(shipId) {
     setSelectedShipId(shipId);
+    setSelectedDarkThreatId('');
     setHoveredShipId(shipId);
     setFocusNonce((n) => n + 1);
+    if (isMobile) setSidebarOpen(false);
+  }
+
+  function handleSelectDarkThreat(threatId) {
+    setSelectedDarkThreatId(threatId);
+    setSelectedShipId('');
+    setHoveredShipId('');
+  }
+
+  function handleFocusThreatOnMap(threatId) {
+    const t = threats.find((x) => x.threatId === threatId);
+    const map = mapRef.current;
+    if (!t?.position || !map) return;
+    map.flyTo(t.position, Math.max(map.getZoom(), 9), {
+      animate: true,
+      duration: 1.1,
+    });
+    handleSelectDarkThreat(threatId);
     if (isMobile) setSidebarOpen(false);
   }
 
@@ -173,6 +289,174 @@ export default function App() {
     }
   }
 
+  async function applyRecommendation(payload) {
+    const ship = ships.find((s) => s.shipId === payload?.shipId);
+    if (!ship) {
+      toast.error('Ship not found for recommendation.');
+      return;
+    }
+    const actionText = String(payload?.suggestedAction || '');
+    const normalize = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').trim();
+    const normAction = normalize(actionText);
+    const tokenSet = new Set(normAction.split(/\s+/).filter(Boolean));
+    const scored = PORTS.map((p) => {
+      const normName = normalize(p.name);
+      const nameTokens = normName.split(/\s+/).filter(Boolean);
+      let score = 0;
+      if (normAction.includes(normName)) score += 3;
+      for (const token of nameTokens) {
+        if (tokenSet.has(token)) score += 1;
+      }
+      return { port: p, score };
+    }).sort((a, b) => b.score - a.score);
+
+    const withSignal = scored[0]?.score > 0 ? scored[0].port : null;
+    const nearestPort = PORTS.slice().sort(
+      (a, b) => kmBetween(ship.position, a.position) - kmBetween(ship.position, b.position)
+    )[0];
+    const matchedPort = withSignal || nearestPort;
+
+    try {
+      const response = await fetch(`${API_URL}/api/ships/${payload.shipId}/destination`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ destination: matchedPort.id }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.error || 'Failed to apply recommendation');
+      }
+      setDiversionRoutes((prev) => ({
+        ...prev,
+        [payload.shipId]: { destinationId: matchedPort.id, updatedAt: Date.now() },
+      }));
+      toast.success(
+        `Route updated: ${ship.name} is now diverting to nearest support station (${matchedPort.name}).`
+      );
+    } catch (error) {
+      toast.error(error.message || 'Failed to apply recommendation');
+    }
+  }
+
+  function zoomToShipCluster(ids) {
+    const map = mapRef.current;
+    if (!map || !ids?.length) return;
+    const selected = ships.filter((s) => ids.includes(s.shipId));
+    if (!selected.length) return;
+    map.fitBounds(selected.map((s) => s.position), {
+      animate: true,
+      duration: 0.9,
+      padding: [40, 40],
+    });
+  }
+
+  function handleRunCommand(query) {
+    const q = query.trim().toLowerCase();
+    const clearsCommandFocus =
+      /^(clear|reset)(\s+(map\s*)?(filter|focus|highlight|command))?$/.test(q) ||
+      /^show\s+all\s+(ships?|fleet)$/.test(q) ||
+      /^show\s+full\s+fleet$/.test(q) ||
+      /^exit\s+(focus|filter)$/.test(q);
+
+    if (clearsCommandFocus) {
+      clearCommandMapFocus();
+      toast.success('Full fleet visible — command highlights cleared.');
+      return;
+    }
+
+    setCommandProximity(null);
+    let ids = ships.map((s) => s.shipId);
+
+    const closestPatterns = [
+      /find\s+(?:the\s+)?closest\s+ship\s+to\s+(.+)/i,
+      /closest\s+ship\s+to\s+(.+)/i,
+      /nearest\s+ship\s+to\s+(.+)/i,
+      /\bclosest\s+to\s+(.+)/i,
+      /\bnearest\s+to\s+(.+)/i,
+    ];
+
+    for (const re of closestPatterns) {
+      const m = query.match(re);
+      if (!m?.[1]) continue;
+      const anchor = findShipByLooseName(m[1], ships);
+      if (!anchor) {
+        toast.error(`No ship matches "${stripCommandNameTail(m[1])}".`);
+        return;
+      }
+      const others = ships.filter((s) => s.shipId !== anchor.shipId);
+      if (!others.length) {
+        toast.error('There are no other vessels to compare.');
+        return;
+      }
+      let nearest = others[0];
+      let bestKm = kmBetween(nearest.position, anchor.position);
+      for (let i = 1; i < others.length; i += 1) {
+        const s = others[i];
+        const d = kmBetween(s.position, anchor.position);
+        if (d < bestKm) {
+          bestKm = d;
+          nearest = s;
+        }
+      }
+      const nm = bestKm / 1.852;
+      setCommandProximity({
+        anchorShipId: anchor.shipId,
+        nearestShipId: nearest.shipId,
+      });
+      ids = [anchor.shipId, nearest.shipId];
+      setCommandFilterShipIds(ids);
+      setSelectedShipId(nearest.shipId);
+      setHoveredShipId(nearest.shipId);
+      setFocusNonce((n) => n + 1);
+      zoomToShipCluster(ids);
+      toast.success(
+        `Nearest to ${anchor.name}: ${nearest.name} (~${nm.toFixed(1)} nm, ${bestKm.toFixed(1)} km). Amber ring = reference ship · Green ring = closest.`,
+        { duration: 5500 }
+      );
+      return;
+    }
+
+    if (/distress|emergency/.test(q)) {
+      ids = ships
+        .filter(
+          (s) =>
+            s?.distress?.active ||
+            s.status === 'geofence_breach' ||
+            s.status === 'out_of_fuel' ||
+            s.status === 'stranded'
+        )
+        .map((s) => s.shipId);
+    } else if (/low fuel|insufficient fuel|fuel/.test(q)) {
+      ids = ships
+        .filter((s) => s.status === 'insufficient_fuel' || s.fuel < 1500)
+        .map((s) => s.shipId);
+    } else if (/tanker/.test(q)) {
+      ids = ships.filter((s) => inferShipType(s) === 'tanker').map((s) => s.shipId);
+    } else if (/passenger|ferry/.test(q)) {
+      ids = ships.filter((s) => inferShipType(s) === 'passenger').map((s) => s.shipId);
+    } else {
+      const nearMatch = q.match(/near\s+([a-z0-9\- ]+)/i);
+      if (nearMatch?.[1]) {
+        const name = nearMatch[1].trim();
+        const anchor = ships.find((s) => s.name.toLowerCase().includes(name));
+        if (anchor) {
+          ids = ships
+            .filter((s) => kmBetween(s.position, anchor.position) <= 60)
+            .map((s) => s.shipId);
+        } else {
+          ids = [];
+        }
+      }
+    }
+
+    if (!ids.length) {
+      toast.error('No ships matched the command.');
+      return;
+    }
+    setCommandFilterShipIds(ids);
+    zoomToShipCluster(ids);
+  }
+
   useEffect(() => {
     if (!alerts.length) return;
     const latest = alerts[alerts.length - 1];
@@ -188,10 +472,34 @@ export default function App() {
     } else if (latest.type === 'distress') {
       const severity = latest.payload?.severity || 'medium';
       const border = severity === 'high' ? '#ff2d55' : '#f59e0b';
-      toast.error(
-        `Severity: ${severity.toUpperCase()} | Type: ${String(latest.payload?.type || 'general')}`,
-        { style: { border: `2px solid ${border}`, boxShadow: `0 0 12px ${border}` } }
-      );
+      setLatestRecommendation(latest.payload);
+      toast.custom((t) => (
+        <div
+          className="ai-recommend-toast"
+          style={{ border: `2px solid ${border}`, opacity: t.visible ? 1 : 0.2 }}
+        >
+          <div>
+            <strong>
+              Severity: {severity.toUpperCase()} | Type:{' '}
+              {String(latest.payload?.type || 'general')}
+            </strong>
+          </div>
+          <div>{latest.payload?.summary || 'Distress alert received'}</div>
+          <div className="ai-recommend-box">
+            AI Recommendation: {latest.payload?.suggestedAction || 'Monitor and coordinate support.'}
+          </div>
+          <button
+            type="button"
+            className="tool-btn"
+            onClick={() => {
+              applyRecommendation(latest.payload);
+              toast.dismiss(t.id);
+            }}
+          >
+            Apply AI Recommendation
+          </button>
+        </div>
+      ));
       if (latest.payload?.shipId) {
         setDistressPulseByShip((prev) => ({
           ...prev,
@@ -213,8 +521,31 @@ export default function App() {
           }, 260);
         }
       }
+    } else if (latest.type === 'fleet_advisor') {
+      toast.error(latest.payload?.summary || 'Fleet advisor warning');
+      setLatestRecommendation(latest.payload);
+    } else if (latest.type === 'security') {
+      const p = latest.payload || {};
+      const msg = p.message || 'Security alert';
+      if (p.kind === 'threat') {
+        toast.error(msg, { duration: 8000 });
+        if (highAlarmRef.current) {
+          highAlarmRef.current.currentTime = 0;
+          highAlarmRef.current.play().catch(() => {});
+        }
+      } else if (p.kind === 'caution') {
+        toast(msg, {
+          duration: 6000,
+          style: { borderLeft: '4px solid #eab308' },
+        });
+      } else {
+        toast(msg, {
+          duration: 4500,
+          style: { borderLeft: '4px solid #38bdf8' },
+        });
+      }
     }
-    if (latest.type !== 'distress' && beepRef.current) {
+    if (latest.type !== 'distress' && latest.type !== 'security' && beepRef.current) {
       beepRef.current.currentTime = 0;
       beepRef.current.play().catch(() => {});
     }
@@ -233,9 +564,13 @@ export default function App() {
         preload="auto"
         src="data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YRAAAAAA////AAAA////AAAA"
       />
-      <div className="map-wrap">
+      <div className={`map-wrap map-theme-${mapTheme}`}>
+        <CommandSearch onRunCommand={handleRunCommand} />
+        <div className="map-cinematic-overlay" aria-hidden="true" />
+        <div className="map-grid-overlay" aria-hidden="true" />
         <TopLeftHud socketStatus={socketStatus} shipsCount={ships.length} />
-        <TopCenterHud utcClock={utcClock} windSpeed={weather.wind} />
+        <TopRightUtcHud utcClock={utcClock} />
+        <TopCenterHud windSpeed={weather.wind} />
         <BottomLeftHud cursorCoords={cursorCoords} />
         <BottomCenterHud weather={weather} />
         <div className="hud-panel hud-top-right rounded-xl map-tools">
@@ -249,6 +584,20 @@ export default function App() {
               <span className="tool-label">
                 {sidebarOpen ? 'Close Panel' : 'Open Panel'}
               </span>
+            </button>
+          ) : null}
+          {commandMapFocusActive ? (
+            <button
+              type="button"
+              className="tool-btn command-clear-focus-btn"
+              onClick={() => {
+                clearCommandMapFocus();
+                toast.success('Full fleet visible — highlights cleared.');
+              }}
+              title="Clear command filter, pairing line, and marker rings"
+            >
+              <FilterX size={14} />
+              <span className="tool-label">Clear focus</span>
             </button>
           ) : null}
           <button
@@ -285,6 +634,15 @@ export default function App() {
           >
             <span className="tool-label">Follow Selected</span>
           </button>
+          <button
+            type="button"
+            className="tool-btn"
+            onClick={() => setMapTheme((prev) => (prev === 'dark' ? 'earth' : 'dark'))}
+          >
+            <span className="tool-label">
+              Theme: {mapTheme === 'dark' ? 'Tactical Dark' : 'Earth Contrast'}
+            </span>
+          </button>
           <div className="role-toggle">
             <button
               type="button"
@@ -310,38 +668,116 @@ export default function App() {
           minZoom={6}
           maxZoom={11}
           maxBounds={maxBounds}
-          maxBoundsViscosity={0.9}
+          maxBoundsViscosity={0.45}
+          scrollWheelZoom
+          wheelDebounceTime={16}
+          wheelPxPerZoomLevel={42}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; CartoDB'
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            attribution={tileConfig.attribution}
+            url={tileConfig.url}
           />
+          {tileConfig.labelUrl ? (
+            <TileLayer
+              attribution={tileConfig.attribution}
+              url={tileConfig.labelUrl}
+              className="country-label-layer"
+              zIndex={450}
+            />
+          ) : null}
 
           {navigableWater ? (
             <GeoJSON
               data={navigableWater}
-              style={{
-                color: '#38bdf8',
-                weight: 1.4,
-                fillColor: '#0ea5e9',
-                fillOpacity: 0.14,
-              }}
+              style={navigableStyle}
             />
           ) : null}
+
+          {userRole === 'command'
+            ? visibleShips.map((ship) => (
+                <Circle
+                  key={`radar-${ship.shipId}`}
+                  center={ship.position}
+                  radius={10000}
+                  interactive={false}
+                  pathOptions={{
+                    className: 'leaflet-radar-ring',
+                    color: 'rgba(103, 232, 249, 0.42)',
+                    weight: 1,
+                    opacity: 0.75,
+                    fillOpacity: 0,
+                    dashArray: '6 12',
+                  }}
+                />
+              ))
+            : null}
 
           {visibleShips.map((ship) => (
             <ShipMarker
               key={ship.shipId}
               ship={ship}
               markerRefs={markerRefs}
-              highlighted={hoveredShipId === ship.shipId}
+              highlighted={
+                hoveredShipId === ship.shipId ||
+                commandProximity?.nearestShipId === ship.shipId
+              }
               distressPulse={
                 ship?.distress?.active ||
+                isCriticalStatus(ship.status) ||
                 (Date.now() - (distressPulseByShip[ship.shipId] || 0) < 6000)
               }
+              dimmed={
+                Boolean(commandFilterSet) && !commandFilterSet.has(ship.shipId)
+              }
+              commandAnchor={commandProximity?.anchorShipId === ship.shipId}
+              commandTarget={commandProximity?.nearestShipId === ship.shipId}
               onSelectShip={handleSelectShip}
             />
           ))}
+
+          {userRole === 'command'
+            ? threats
+                .filter((t) => t.tier >= 1)
+                .map((t) => (
+                  <DarkThreatMarker
+                    key={t.threatId}
+                    threat={t}
+                    onSelectDarkThreat={handleSelectDarkThreat}
+                  />
+                ))
+            : null}
+
+          {Object.entries(diversionRoutes).map(([shipId, route]) => {
+            const ship = ships.find((s) => s.shipId === shipId);
+            const port = PORTS.find((p) => p.id === route.destinationId);
+            if (!ship || !port) return null;
+            return (
+              <Polyline
+                key={`divert-${shipId}`}
+                positions={[ship.position, port.position]}
+                pathOptions={{
+                  color: '#f59e0b',
+                  weight: 2,
+                  dashArray: '6 8',
+                  opacity: 0.9,
+                }}
+              />
+            );
+          })}
+
+          {commandProximityLinePositions ? (
+            <Polyline
+              key="command-closest-link"
+              positions={commandProximityLinePositions}
+              pathOptions={{
+                color: '#34d399',
+                weight: 3,
+                dashArray: '12 10',
+                opacity: 0.92,
+                lineCap: 'round',
+              }}
+            />
+          ) : null}
 
           <DrawZonesController
             userRole={userRole}
@@ -362,6 +798,8 @@ export default function App() {
           <MapViewportController
             sidebarOpen={sidebarOpen}
             isMobile={isMobile}
+            maxBounds={maxBounds}
+            maxBoundsViscosity={0.45}
           />
           <CursorHudController onMove={setCursorCoords} />
         </MapContainer>
@@ -378,7 +816,14 @@ export default function App() {
 
       <CommandSidebar
         ships={visibleShips}
+        threats={threats}
         allShips={ships}
+        selectedDarkThreatId={selectedDarkThreatId}
+        onFocusThreat={handleFocusThreatOnMap}
+        typeFilter={typeFilter}
+        onTypeFilterChange={setTypeFilter}
+        latestRecommendation={latestRecommendation}
+        onApplyRecommendation={applyRecommendation}
         selectedShipId={selectedShipId}
         onSelectShip={handleSelectShip}
         setHoveredShipId={setHoveredShipId}

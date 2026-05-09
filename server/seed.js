@@ -56,6 +56,7 @@ async function seed() {
       destination: s.destination,
       fuel: s.fuel,
       cargo: s.cargo,
+      type: s.type || 'cargo',
       status: s.status,
     };
   });

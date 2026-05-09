@@ -8,6 +8,7 @@ import './styles/layout.css';
 import './styles/hud.css';
 import './styles/sidebar.css';
 import './styles/map-markers.css';
+import './styles/map-threats.css';
 import App from './App.jsx';
 
 window.L = L;

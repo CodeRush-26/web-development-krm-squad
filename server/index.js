@@ -1,5 +1,8 @@
 import 'dotenv/config';
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import { Server } from 'socket.io';
@@ -14,12 +17,25 @@ import { createNavigableWaterRouter } from './routes/navigable-water.routes.js';
 import { createShipsRouter } from './routes/ships.routes.js';
 import { createZonesRouter } from './routes/zones.routes.js';
 import { createDistressRouter } from './routes/distress.routes.js';
+import { createThreatsRouter } from './routes/threats.routes.js';
 import { Simulator } from './services/Simulator.js';
 import { GeminiService } from './services/GeminiService.js';
 
 const PORT = Number(process.env.PORT) || 5050;
 const MONGO_URI = process.env.MONGO_URI;
 const allowedOrigins = resolveCorsOrigins();
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** @type {{ shadowFleet?: unknown[] } | null} */
+let shadowFleetConfig = null;
+try {
+  shadowFleetConfig = JSON.parse(
+    readFileSync(join(__dirname, 'data/threats.json'), 'utf8')
+  );
+} catch (err) {
+  console.warn('[Boot] Could not load data/threats.json — shadow fleet disabled:', err.message);
+}
 
 const app = express();
 app.use(
@@ -37,10 +53,6 @@ const io = new Server(server, {
     credentials: true,
   },
 });
-
-io.on('connection', (socket) => {
-  socket.emit('connected', { message: 'fleet channel ready' });
-}); 
 
 async function main() {
   if (!MONGO_URI) {
@@ -76,10 +88,17 @@ async function main() {
   }
 
   const ramShips = Simulator.fromDocuments(shipDocs);
-  const simulator = new Simulator({ io, navigable, ships: ramShips, portsById });
+  const simulator = new Simulator({
+    io,
+    navigable,
+    ships: ramShips,
+    portsById,
+    shadowFleetConfig,
+  });
   const geminiService = new GeminiService();
 
   io.on('connection', (socket) => {
+    socket.emit('connected', { message: 'fleet channel ready' });
     socket.emit('zones-updated', simulator.getZonesPayload());
   });
 
@@ -88,6 +107,7 @@ async function main() {
   app.use('/api/navigable-water', createNavigableWaterRouter(nwDoc));
   app.use('/api/zones', createZonesRouter(simulator));
   app.use('/api/distress', createDistressRouter(geminiService, io, simulator));
+  app.use('/api/threats', createThreatsRouter(simulator, geminiService));
 
   simulator.start();
 

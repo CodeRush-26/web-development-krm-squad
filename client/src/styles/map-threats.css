@@ -1,0 +1,73 @@
+.dark-threat-icon-wrap {
+  background: transparent !important;
+  border: 0 !important;
+}
+
+.dark-threat-marker {
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 0 8px rgba(0, 0, 0, 0.65));
+}
+
+.dark-threat-marker.tier-1 {
+  color: #94a3b8;
+}
+
+.dark-threat-marker.tier-2 {
+  color: #facc15;
+  filter: drop-shadow(0 0 10px rgba(250, 204, 21, 0.55));
+}
+
+.dark-threat-marker.tier-3 {
+  color: #f87171;
+  filter: drop-shadow(0 0 14px rgba(248, 113, 113, 0.65));
+}
+
+.dark-threat-marker.identified {
+  color: #fb923c;
+  filter: drop-shadow(0 0 12px rgba(251, 146, 60, 0.55));
+}
+
+@keyframes dark-threat-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.08);
+  }
+}
+
+.dark-threat-flash {
+  animation: dark-threat-pulse 0.85s ease-in-out infinite;
+}
+
+.dark-threat-popup {
+  min-width: 200px;
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.dark-threat-popup-meta {
+  margin: 6px 0 10px;
+  line-height: 1.45;
+  opacity: 0.92;
+}
+
+.dark-threat-id-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.dark-threat-classified {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #0369a1;
+  font-weight: 600;
+}
+
+.leaflet-radar-ring {
+  pointer-events: none;
+}

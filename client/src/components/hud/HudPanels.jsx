@@ -13,11 +13,21 @@ export function TopLeftHud({ socketStatus, shipsCount }) {
   );
 }
 
-export function TopCenterHud({ utcClock, windSpeed }) {
+export function TopRightUtcHud({ utcClock }) {
+  return (
+    <div className="hud-panel hud-utc-card rounded-xl hud-mono" aria-live="polite">
+      <div className="utc-card-label">
+        <strong>UTC</strong>
+      </div>
+      <div className="utc-card-time">{utcClock}</div>
+    </div>
+  );
+}
+
+export function TopCenterHud({ windSpeed }) {
   const highWinds = Number(windSpeed ?? 0) > 30;
   return (
     <div className="hud-panel hud-top-center rounded-xl">
-      <div className="clock-line">UTC {utcClock}</div>
       <div className={`status-line ${highWinds ? 'status-caution' : ''}`}>
         <span className="status-led" />
         {highWinds ? 'CAUTION: HIGH WINDS' : 'System Status: Online'}

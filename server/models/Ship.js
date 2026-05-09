@@ -20,6 +20,12 @@ const ShipSchema = new mongoose.Schema(
     destination: { type: String, required: true },
     fuel: { type: Number, required: true },
     cargo: { type: String, required: true },
+    type: {
+      type: String,
+      enum: ['cargo', 'tanker', 'passenger', 'security'],
+      default: 'cargo',
+      required: true,
+    },
     status: { type: String, required: true, default: 'normal' },
   },
   { timestamps: true }
@@ -38,6 +44,7 @@ function fleetShape(o) {
     destination: o.destination,
     fuel: o.fuel,
     cargo: o.cargo,
+    type: o.type,
     status: o.status,
     updatedAt: o.updatedAt,
   };

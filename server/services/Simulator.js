@@ -1,21 +1,59 @@
 import * as turf from '@turf/turf';
 import axios from 'axios';
 import Ship from '../models/Ship.js';
+import { evaluateThreatExposure } from './SecurityService.js';
 
 const TICK_MS = 1000;
-const WEATHER_REFRESH_MS = 5 * 60 * 1000;
+/** Align polling with cache TTL so we do not schedule needless refreshes. */
+const WEATHER_REFRESH_MS = 10 * 60 * 1000;
 const PROXIMITY_KM = 2;
+const OPEN_METEO_MIN_INTERVAL_MS = 1000;
+const OPEN_METEO_CACHE_TTL_MS = 10 * 60 * 1000;
+const OPEN_METEO_429_RETRY_DELAY_MS = 5000;
+/** Initial attempt plus up to three retries after HTTP 429. */
+const OPEN_METEO_MAX_ATTEMPTS_ON_429 = 4;
+const MS_TO_KNOTS = 1.9438444924406;
 const DEFAULT_WEATHER = {
   wind: 15,
   waves: 1,
 };
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function buildWeatherUrl() {
   const latitude = num(process.env.WEATHER_LATITUDE, 26.0);
   const longitude = num(process.env.WEATHER_LONGITUDE, 55.0);
-  const requested = process.env.WEATHER_CURRENT_PARAMS || 'wind_speed_10m,wave_height';
+  const requested =
+    process.env.WEATHER_CURRENT_PARAMS ||
+    'wind_speed_10m,wind_direction_10m,wind_gusts_10m,wave_height';
+  const windUnit = process.env.WEATHER_WIND_SPEED_UNIT || 'ms';
   const params = encodeURIComponent(requested);
-  return `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=${params}`;
+  const unitParam = encodeURIComponent(windUnit);
+  return `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=${params}&wind_speed_unit=${unitParam}`;
+}
+
+function openMeteoCacheKeyFromUrl(url) {
+  return url;
+}
+
+/**
+ * Wind from API is converted to knots for existing simulator / UI thresholds.
+ * Wave height may be absent from current params at some coordinates — keep previous when missing.
+ */
+function normalizeOpenMeteoCurrent(data, previousWavesFallback) {
+  const windMs = num(data?.current?.wind_speed_10m, NaN);
+  const wind = Number.isFinite(windMs) ? windMs * MS_TO_KNOTS : DEFAULT_WEATHER.wind;
+  const waveRaw = data?.current?.wave_height;
+  const waves = Number.isFinite(Number(waveRaw))
+    ? Number(waveRaw)
+    : Number.isFinite(Number(previousWavesFallback))
+      ? Number(previousWavesFallback)
+      : DEFAULT_WEATHER.waves;
+  return { wind, waves };
 }
 
 function num(v, fallback) {
@@ -41,6 +79,7 @@ function docToRamShip(doc) {
     destination: o.destination,
     fuel: o.fuel,
     cargo: o.cargo,
+    type: o.type || 'cargo',
     status: o.status,
     envDrag: 0,
     envDragKnots: 0,
@@ -66,6 +105,7 @@ function ramToPayload(s) {
     destination: s.destination,
     fuel: s.fuel,
     cargo: s.cargo,
+    type: s.type || 'cargo',
     status: s.status,
   };
 }
@@ -91,6 +131,26 @@ function normalizeHeading(h) {
   return mod < 0 ? mod + 360 : mod;
 }
 
+/** @param {{ threatId: string; position: [number, number]; speed?: number; heading?: number; behavior?: string; seedPhase?: number }} row */
+function initDarkVesselRow(row) {
+  const [lat, lng] = row.position;
+  return {
+    threatId: row.threatId,
+    lat,
+    lng,
+    heading: row.heading ?? 0,
+    baseSpeed: row.speed ?? 8,
+    speed: row.speed ?? 8,
+    behavior: row.behavior === 'stationary' ? 'stationary' : 'erratic',
+    phase: row.seedPhase ?? Math.random() * Math.PI * 2,
+    identified: false,
+    aiLabel: null,
+    tier: 0,
+    minDistanceKm: null,
+    closestFriendlyShipId: null,
+  };
+}
+
 export class Simulator {
   /**
    * @param {{
@@ -98,13 +158,18 @@ export class Simulator {
    *   navigable: import('geojson').Polygon | import('geojson').Feature<import('geojson').Polygon>;
    *   ships: ReturnType<typeof docToRamShip>[];
    *   portsById?: Record<string, { lng: number; lat: number }>;
+   *   shadowFleetConfig?: { shadowFleet?: unknown[] } | null;
    * }} params
    */
-  constructor({ io, navigable, ships, portsById = {} }) {
+  constructor({ io, navigable, ships, portsById = {}, shadowFleetConfig = null }) {
     this.io = io;
     this.navigable = navigable;
     this.ships = ships;
     this.portsById = portsById;
+    this.darkVessels =
+      Array.isArray(shadowFleetConfig?.shadowFleet) && shadowFleetConfig.shadowFleet.length > 0
+        ? shadowFleetConfig.shadowFleet.map((row) => initDarkVesselRow(row))
+        : [];
     /** @type {ReturnType<typeof setInterval> | null} */
     this.intervalId = null;
     /** @type {ReturnType<typeof setInterval> | null} */
@@ -123,6 +188,14 @@ export class Simulator {
     };
     /** @type {{ id: string; feature: import('geojson').Feature<import('geojson').Polygon> }[]} */
     this.restrictedZones = [];
+    this.lastAdvisorByShip = new Map();
+
+    /** Prevent overlapping Open-Meteo requests (e.g. start() + interval). */
+    this._weatherFetchInFlight = false;
+    /** Timestamp (ms) of last finished HTTP request to Open-Meteo (success or error). */
+    this._lastOpenMeteoHttpAt = 0;
+    /** @type {{ key: string; expiresAt: number; payload: { wind: number; waves: number }; syncedAtIso: string } | null} */
+    this._openMeteoCache = null;
   }
 
   /** @param {import('mongoose').Document[]} shipDocs */
@@ -151,6 +224,78 @@ export class Simulator {
     }));
   }
 
+  getThreatPayload() {
+    return this.darkVessels.map((dv) => ({
+      threatId: dv.threatId,
+      position: [dv.lat, dv.lng],
+      speed: dv.speed,
+      heading: dv.heading,
+      tier: dv.tier,
+      distanceKm: dv.minDistanceKm,
+      closestFriendlyShipId: dv.closestFriendlyShipId,
+      identified: dv.identified,
+      aiLabel: dv.aiLabel || null,
+      behavior: dv.behavior,
+    }));
+  }
+
+  broadcastFleetUpdate() {
+    this.io.emit('fleet-update', {
+      ships: this.getFleetPayload(),
+      threats: this.getThreatPayload(),
+      weather: this.getWeatherPayload(),
+      zones: this.getZonesPayload(),
+    });
+  }
+
+  tickDarkVessels() {
+    for (const dv of this.darkVessels) {
+      if (dv.behavior === 'stationary') {
+        dv.speed = 0;
+        dv.phase += 0.015;
+        continue;
+      }
+
+      dv.phase += 0.06 + Math.random() * 0.03;
+      const turn = Math.sin(dv.phase) * 24 + (Math.random() - 0.5) * 12;
+      dv.heading = normalizeHeading(dv.heading + turn);
+      dv.speed = Math.max(
+        3,
+        Math.min(15, dv.baseSpeed + Math.sin(dv.phase * 1.37) * 4 + (Math.random() - 0.5) * 2)
+      );
+
+      const [nextLng, nextLat] = moveByHeading(dv.lng, dv.lat, dv.heading, dv.speed);
+      if (this.isNavigable(nextLng, nextLat)) {
+        dv.lng = nextLng;
+        dv.lat = nextLat;
+      } else {
+        dv.heading = normalizeHeading(dv.heading + 130 + Math.random() * 60);
+      }
+    }
+  }
+
+  /**
+   * @param {string} threatId
+   * @param {import('./GeminiService.js').GeminiService} geminiService
+   */
+  async identifyDarkThreat(threatId, geminiService) {
+    const dv = this.darkVessels.find((d) => d.threatId === threatId);
+    if (!dv) return { ok: false, error: 'threat not found' };
+    if (dv.tier < 1) return { ok: false, error: 'contact outside radar envelope' };
+
+    const { classification } = await geminiService.analyzeThreatSignature({
+      proximityKm: dv.minDistanceKm,
+      speedKnots: dv.speed,
+      tier: dv.tier,
+      behavior: dv.behavior,
+    });
+
+    dv.identified = true;
+    dv.aiLabel = classification;
+    this.broadcastFleetUpdate();
+    return { ok: true, aiLabel: dv.aiLabel };
+  }
+
   addRestrictedZone(feature) {
     const id = `zone-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     this.restrictedZones.push({ id, feature: { ...feature, type: 'Feature' } });
@@ -169,35 +314,117 @@ export class Simulator {
     return true;
   }
 
+  async updateShipDestination(shipId, destination) {
+    const ship = this.ships.find((s) => s.shipId === shipId);
+    if (!ship) return false;
+    ship.destination = destination;
+    await Ship.updateOne({ shipId }, { $set: { destination } }).exec();
+    return true;
+  }
+
+  async enforceOpenMeteoMinInterval() {
+    const last = this._lastOpenMeteoHttpAt || 0;
+    const elapsed = Date.now() - last;
+    if (last > 0 && elapsed < OPEN_METEO_MIN_INTERVAL_MS) {
+      await sleep(OPEN_METEO_MIN_INTERVAL_MS - elapsed);
+    }
+  }
+
+  /**
+   * Apply wind/waves and optional metadata for logging.
+   * @param {{ wind: number; waves: number }} normalized
+   * @param {'open-meteo' | 'open-meteo-cache'} source
+   * @param {string | null} lastSuccessfulSyncIso
+   */
+  applyWeatherSnapshot(normalized, source, lastSuccessfulSyncIso) {
+    const now = new Date().toISOString();
+    console.log('Weather API Sync:', {
+      windSpeedKnots: Number(normalized.wind.toFixed(2)),
+      waveHeight: normalized.waves,
+      fetchedAt: now,
+      source,
+    });
+    this.globalWeather = {
+      wind: normalized.wind,
+      waves: normalized.waves,
+      updatedAt: now,
+      source,
+      lastSuccessfulSync: lastSuccessfulSyncIso ?? now,
+    };
+  }
+
   async refreshWeather() {
+    if (this._weatherFetchInFlight) {
+      return;
+    }
+    this._weatherFetchInFlight = true;
+
     try {
-      const { data } = await axios.get(buildWeatherUrl(), { timeout: 8000 });
-      const wind = num(data?.current?.wind_speed_10m, 0);
-      const waves = num(data?.current?.wave_height, 0);
-      const now = new Date().toISOString();
-      const weatherData = {
-        windSpeed: wind,
-        waveHeight: waves,
-        fetchedAt: now,
-        source: 'open-meteo',
-      };
-      console.log('Weather API Sync:', weatherData);
+      const url = buildWeatherUrl();
+      const cacheKey = openMeteoCacheKeyFromUrl(url);
+      const nowMs = Date.now();
+
+      if (
+        this._openMeteoCache &&
+        this._openMeteoCache.key === cacheKey &&
+        nowMs < this._openMeteoCache.expiresAt
+      ) {
+        const { payload, syncedAtIso } = this._openMeteoCache;
+        this.applyWeatherSnapshot(payload, 'open-meteo-cache', syncedAtIso);
+        return;
+      }
+
+      await this.enforceOpenMeteoMinInterval();
+
+      let lastError = null;
+      for (let attempt = 1; attempt <= OPEN_METEO_MAX_ATTEMPTS_ON_429; attempt += 1) {
+        try {
+          const { data } = await axios.get(url, { timeout: 12000 });
+          const normalized = normalizeOpenMeteoCurrent(data, this.globalWeather.waves);
+          const syncedAtIso = new Date().toISOString();
+
+          this._openMeteoCache = {
+            key: cacheKey,
+            expiresAt: Date.now() + OPEN_METEO_CACHE_TTL_MS,
+            payload: normalized,
+            syncedAtIso,
+          };
+          this._lastOpenMeteoHttpAt = Date.now();
+
+          this.applyWeatherSnapshot(normalized, 'open-meteo', syncedAtIso);
+          return;
+        } catch (error) {
+          lastError = error;
+          this._lastOpenMeteoHttpAt = Date.now();
+          const status = error?.response?.status;
+
+          if (status === 429 && attempt < OPEN_METEO_MAX_ATTEMPTS_ON_429) {
+            console.warn(
+              `[Simulator] Open-Meteo 429 — retry ${attempt}/${OPEN_METEO_MAX_ATTEMPTS_ON_429 - 1} after ${OPEN_METEO_429_RETRY_DELAY_MS}ms`
+            );
+            await sleep(OPEN_METEO_429_RETRY_DELAY_MS);
+            await this.enforceOpenMeteoMinInterval();
+            continue;
+          }
+
+          break;
+        }
+      }
+
+      console.error('[Simulator] weather fetch failed:', lastError?.message || lastError);
+
+      const hadLive =
+        this.globalWeather.source === 'open-meteo' ||
+        this.globalWeather.source === 'open-meteo-cache';
       this.globalWeather = {
-        wind,
-        waves,
-        updatedAt: now,
-        source: 'open-meteo',
-        lastSuccessfulSync: now,
-      };
-    } catch (error) {
-      console.error('[Simulator] weather fetch failed:', error.message);
-      this.globalWeather = {
-        wind: DEFAULT_WEATHER.wind,
-        waves: DEFAULT_WEATHER.waves,
-        updatedAt: this.globalWeather.updatedAt,
-        source: 'fallback-default',
+        wind: hadLive ? this.globalWeather.wind : DEFAULT_WEATHER.wind,
+        waves: hadLive ? this.globalWeather.waves : DEFAULT_WEATHER.waves,
+        updatedAt: new Date().toISOString(),
+        source: hadLive ? this.globalWeather.source : 'fallback-default',
         lastSuccessfulSync: this.globalWeather.lastSuccessfulSync,
       };
+    } finally {
+      this._weatherFetchInFlight = false;
     }
   }
 
@@ -310,6 +537,22 @@ export class Simulator {
       !Simulator.isHardCritical(ship.status)
     ) {
       ship.status = 'insufficient_fuel';
+      const deficit = distanceToDestinationKm - reachableKm;
+      const now = Date.now();
+      const lastAt = this.lastAdvisorByShip.get(ship.shipId) || 0;
+      if (deficit > 5 && now - lastAt > 30000) {
+        this.lastAdvisorByShip.set(ship.shipId, now);
+        this.io.emit('fleet-advisor-alert', {
+          shipId: ship.shipId,
+          severity: 'high',
+          type: 'fuel_projection',
+          summary: `Warning: ${ship.name} will run out of fuel ${Math.round(
+            deficit
+          )}km before ${ship.destination}. Suggest speed reduction to 12kn.`,
+          suggestedAction: 'Reduce speed to 12kn and divert to nearest support port.',
+          timestamp: new Date().toISOString(),
+        });
+      }
     }
   }
 
@@ -476,11 +719,47 @@ export class Simulator {
         }
       }
 
-      this.io.emit('fleet-update', {
-        ships: this.getFleetPayload(),
-        weather: this.getWeatherPayload(),
-        zones: this.getZonesPayload(),
-      });
+      this.tickDarkVessels();
+
+      const threatEval = evaluateThreatExposure(this.ships, this.darkVessels);
+      for (const ev of threatEval) {
+        const dv = this.darkVessels.find((d) => d.threatId === ev.threatId);
+        if (!dv) continue;
+        const prevTier = dv.tier;
+        dv.tier = ev.tier;
+        dv.minDistanceKm = ev.minDistanceKm;
+        dv.closestFriendlyShipId = ev.closestFriendlyShipId;
+
+        if (ev.tier > prevTier) {
+          const base = {
+            threatId: dv.threatId,
+            tier: ev.tier,
+            distanceKm: ev.minDistanceKm,
+            closestFriendlyShipId: ev.closestFriendlyShipId,
+          };
+          if (ev.tier === 1) {
+            this.io.emit('security-alert', {
+              ...base,
+              kind: 'detection',
+              message: 'Radar contact — unidentified vessel (ghost track)',
+            });
+          } else if (ev.tier === 2) {
+            this.io.emit('security-alert', {
+              ...base,
+              kind: 'caution',
+              message: 'Target of Interest — unidentified vessel closing range',
+            });
+          } else if (ev.tier === 3) {
+            this.io.emit('security-alert', {
+              ...base,
+              kind: 'threat',
+              message: 'Security breach — unidentified vessel inside threat radius',
+            });
+          }
+        }
+      }
+
+      this.broadcastFleetUpdate();
 
       if (statusChanged.length > 0) {
         await this.persistShipSubset(statusChanged);

@@ -68,6 +68,7 @@
       "destination": "MCT-1",
       "fuel": 6800,
       "cargo": "crude oil",
+      "type": "tanker",
       "status": "normal"
     },
     {
@@ -79,6 +80,7 @@
       "destination": "DXB-1",
       "fuel": 5400,
       "cargo": "containers",
+      "type": "cargo",
       "status": "normal"
     },
     {
@@ -90,6 +92,7 @@
       "destination": "MCT-1",
       "fuel": 7200,
       "cargo": "LNG",
+      "type": "cargo",
       "status": "normal"
     },
     {
@@ -101,6 +104,7 @@
       "destination": "SOH-1",
       "fuel": 5800,
       "cargo": "bulk grain",
+      "type": "cargo",
       "status": "normal"
     },
     {
@@ -112,6 +116,7 @@
       "destination": "DOH-1",
       "fuel": 8200,
       "cargo": "crude oil",
+      "type": "tanker",
       "status": "normal"
     },
     {
@@ -123,6 +128,7 @@
       "destination": "DOH-1",
       "fuel": 4100,
       "cargo": "containers",
+      "type": "cargo",
       "status": "normal"
     },
     {
@@ -134,6 +140,7 @@
       "destination": "KWT-1",
       "fuel": 750,
       "cargo": "crude oil",
+      "type": "cargo",
       "status": "normal"
     },
     {
@@ -145,6 +152,7 @@
       "destination": "DMM-1",
       "fuel": 5200,
       "cargo": "automobiles",
+      "type": "cargo",
       "status": "normal"
     },
     {
@@ -156,6 +164,7 @@
       "destination": "BAH-1",
       "fuel": 7800,
       "cargo": "crude oil",
+      "type": "tanker",
       "status": "normal"
     },
     {
@@ -167,6 +176,7 @@
       "destination": "BND-1",
       "fuel": 6300,
       "cargo": "containers",
+      "type": "passenger",
       "status": "normal"
     },
     {
@@ -178,6 +188,7 @@
       "destination": "MCT-1",
       "fuel": 7600,
       "cargo": "LNG",
+      "type": "cargo",
       "status": "normal"
     },
     {
@@ -189,6 +200,7 @@
       "destination": "SOH-1",
       "fuel": 8500,
       "cargo": "crude oil",
+      "type": "tanker",
       "status": "normal"
     },
     {
@@ -200,6 +212,7 @@
       "destination": "BAH-1",
       "fuel": 5900,
       "cargo": "containers",
+      "type": "tanker",
       "status": "normal"
     },
     {
@@ -211,6 +224,7 @@
       "destination": "DOH-1",
       "fuel": 4600,
       "cargo": "bulk cement",
+      "type": "security",
       "status": "normal"
     },
     {
@@ -222,6 +236,7 @@
       "destination": "MCT-1",
       "fuel": 7100,
       "cargo": "crude oil",
+      "type": "tanker",
       "status": "normal"
     }
   ]

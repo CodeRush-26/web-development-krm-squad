@@ -11,9 +11,11 @@ export function createDistressRouter(geminiService, io, simulator) {
     try {
       const { shipId, message } = req.body ?? {};
       const result = await geminiService.analyzeDistressMessage(message);
+      const timestamp = result.timestamp || new Date().toISOString();
       const payload = {
         shipId: shipId ?? null,
         ...result,
+        timestamp,
         at: Date.now(),
       };
       if (shipId) {

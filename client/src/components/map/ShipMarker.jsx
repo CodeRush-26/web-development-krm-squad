@@ -1,17 +1,45 @@
 ﻿import { memo, useMemo } from 'react';
 import { Marker, Popup } from 'react-leaflet';
-import { createShipIcon } from '../../utils/shipVisuals';
+import {
+  createShipIcon,
+  inferShipType,
+  shipTypeCode,
+  TYPE_LABELS,
+} from '../../utils/shipVisuals';
 
 export const ShipMarker = memo(function ShipMarker({
   ship,
   markerRefs,
   highlighted,
   distressPulse,
+  dimmed,
+  commandAnchor,
+  commandTarget,
   onSelectShip,
 }) {
+  const resolvedType = inferShipType(ship);
   const icon = useMemo(
-    () => createShipIcon(ship.heading, ship.status, highlighted, distressPulse),
-    [ship.heading, ship.status, highlighted, distressPulse]
+    () =>
+      createShipIcon(
+        ship.heading,
+        ship.status,
+        highlighted,
+        distressPulse,
+        resolvedType,
+        dimmed,
+        Boolean(commandAnchor),
+        Boolean(commandTarget)
+      ),
+    [
+      ship.heading,
+      ship.status,
+      highlighted,
+      distressPulse,
+      resolvedType,
+      dimmed,
+      commandAnchor,
+      commandTarget,
+    ]
   );
 
   return (
@@ -29,6 +57,8 @@ export const ShipMarker = memo(function ShipMarker({
     >
       <Popup>
         <strong>{ship.name}</strong>
+        <br />
+        Type: [{shipTypeCode(resolvedType)}] {TYPE_LABELS[resolvedType] || TYPE_LABELS.cargo}
         <br />
         Status: {ship.status}
         <br />
